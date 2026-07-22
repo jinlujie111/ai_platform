@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI平台</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app">
+
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <!-- ========== 左侧边栏 ========== -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-block">
+        <div class="brand-mark">AI</div>
+        <div>
+          <strong>AI Platform</strong>
+          <span>AI平台</span>
+        </div>
+      </div>
+      <div class="sidebar-header">
+        <button class="new-chat-btn" id="newReportBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          新建对话
+        </button>
+      </div>
+
+      <div class="conversation-list" id="reportList"></div>
+
+      <div class="sidebar-footer">
+        <div class="footer-item" id="settingsBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          设置
+        </div>
+      </div>
+    </aside>
+
+    <!-- ========== 主聊天区域 ========== -->
+    <main class="main">
+      <header class="chat-header">
+        <button class="mobile-menu-btn" id="mobileMenuBtn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <h1 class="chat-title" id="currentReportTitle">新建会话</h1>
+        <div class="chat-header-tools">
+          <div class="chat-kb-picker" id="chatKbPicker">
+            <button type="button" class="chat-kb-picker-btn" id="chatKbPickerBtn" title="可多选知识库">不使用知识库</button>
+            <div class="chat-kb-picker-menu" id="chatKbPickerMenu" hidden>
+              <label class="chat-kb-picker-item chat-kb-picker-none">
+                <input type="checkbox" id="chatKbNone" checked>
+                <span>不使用知识库</span>
+              </label>
+              <div class="chat-kb-picker-list" id="chatKbPickerList"></div>
+            </div>
+          </div>
+          <div class="chat-kb-picker" id="chatDsPicker">
+            <button type="button" class="chat-kb-picker-btn" id="chatDsPickerBtn" title="可多选数据源">不使用数据源</button>
+            <div class="chat-kb-picker-menu" id="chatDsPickerMenu" hidden>
+              <label class="chat-kb-picker-item chat-kb-picker-none">
+                <input type="checkbox" id="chatDsNone" checked>
+                <span>不使用数据源</span>
+              </label>
+              <div class="chat-kb-picker-list" id="chatDsPickerList"></div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div class="messages" id="messages">
+        <div class="welcome-state" id="welcomeState">
+          <div class="welcome-icon">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          </div>
+          <h2>开始分析你的业务文档</h2>
+          <p>上传合同、报表或合规材料，通过自然语言提问，快速提取关键结论并生成分析摘要。</p>
+          <div class="suggestion-chips">
+            <button class="chip" data-q="分析这份合同的主要条款和风险点">分析合同主要条款</button>
+            <button class="chip" data-q="提取所有金额、日期、违约金数据">提取关键数据</button>
+            <button class="chip" data-q="检查合同是否符合最新合规要求">合规性审查</button>
+            <button class="chip" data-q="生成完整的分析摘要报告">生成摘要报告</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bottom-area">
+        <div class="toolbar" id="toolbar">
+          <button class="tool-btn" id="toolSettings" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>设置</span>
+          </button>
+        </div>
+
+        <div class="input-area">
+          <div class="input-wrapper">
+            <div class="input-container">
+              <textarea id="queryInput" placeholder="输入问题，Enter 发送，Shift+Enter 换行..." rows="2"></textarea>
+              <button class="send-btn" id="sendBtn" title="发送">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </button>
+            </div>
+            <div class="input-meta">
+              <span class="input-hint">请先在配置中心设置并启用模型</span>
+              <span class="char-count" id="charCount">0 / 2000</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ========== 设置弹窗 ========== -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+      <!-- 左侧导航 -->
+      <div class="modal-sidebar">
+        <div class="modal-sidebar-header">
+          <div class="settings-brand-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </div>
+          <div><strong>配置中心</strong><span>Platform settings</span></div>
+        </div>
+        <div class="modal-nav">
+          <div class="modal-nav-label">AI 与数据</div>
+          <button class="modal-nav-item active" data-panel="model">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+            模型配置
+          </button>
+          <button class="modal-nav-item" data-panel="datasource">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            数据源接入
+          </button>
+          <button class="modal-nav-item" data-panel="kb">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            知识库
+          </button>
+          <div class="modal-nav-label">平台能力</div>
+          <button class="modal-nav-item" data-panel="mcp">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            MCP 管理
+          </button>
+          <button class="modal-nav-item" data-panel="skill">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            Skill 管理
+          </button>
+          <button class="modal-nav-item" data-panel="tool">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            Tool 设置
+          </button>
+          <button class="modal-nav-item" data-panel="api">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            API 设置
+          </button>
+ 
+          <button class="modal-nav-item" data-panel="dataprocess">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            数据处理
+          </button>
+          <button class="modal-nav-item" data-panel="permission">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            权限与审计
+          </button>
+
+          <button class="modal-nav-item" data-panel="dataoutput">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            数据输出
+          </button>
+       </div>
+      </div>
+
+      <!-- 右侧内容 -->
+      <div class="modal-content">
+        <div class="modal-content-header">
+          <div class="modal-title-group">
+            <span class="modal-content-title" id="modalTitle">模型配置</span>
+            <span class="modal-content-subtitle">管理平台能力、连接与安全策略</span>
+          </div>
+          <div class="modal-header-status"><span></span>系统运行正常</div>
+          <button class="modal-close" id="closeModal">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <!-- ========== 模型配置面板 ========== -->
+        <div class="modal-panel active" id="panel-model">
+          <div class="panel-desc">配置 AI 大模型，设置 API Key 并测试连接。</div>
+          <div class="model-list" id="modelList"></div>
+          <button class="btn-add-model" id="addModelBtn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            添加自定义模型
+          </button>
+        </div>
+
+        <!-- ========== 数据源接入面板 ========== -->
+        <div class="modal-panel" id="panel-datasource">
+          <div class="panel-desc">配置数据库连接，数据源将用于 SQL 执行与报表数据查询。</div>
+
+          <div class="ds-filter-bar">
+            <input class="ds-search-input" type="text" id="dsSearchInput" placeholder="搜索数据源...">
+            <select class="ds-type-filter" id="dsTypeFilter">
+              <option value="">全部类型</option>
+              <option value="mysql">MySQL</option>
+              <option value="hive">Hive</option>
+              <option value="spark">Spark</option>
+              <option value="kafka">Kafka</option>
+              <option value="postgres">PostgreSQL</option>
+              <option value="mongodb">MongoDB</option>
+              <option value="clickhouse">ClickHouse</option>
+            </select>
+            <button class="btn-add-model" id="addDsBtn" type="button">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              添加数据源
+            </button>
+          </div>
+
+          <div class="ds-list" id="dsList"></div>
+        </div>
+
+        <!-- ========== 知识库面板 ========== -->
+        <div class="modal-panel" id="panel-kb">
+          <div class="kb-panel-header">
+            <div class="panel-desc">查看已配置的知识库，支持接口知识库与自定义知识库。</div>
+            <button class="btn-primary kb-compact-btn" id="addKbConfigBtn" type="button">新增知识库</button>
+          </div>
+
+          <div id="kbConfigRegistry" class="kb-config-registry">
+            <div class="doc-empty-hint">加载中...</div>
+          </div>
+        </div>
+
+
+          <!-- MCP市场内容 -->
+          <div class="modal-panel" id="panel-mcp">
+            <div class="panel-desc">用户可自行配置 MCP 服务器或从市场安装；管理员可维护市场条目并执行上线、下线和修改。</div>
+            <div class="kb-section">
+              <div class="kb-section-title">我的 MCP</div>
+              <div class="mcp-search-bar">
+                <input class="ds-search-input" type="text" id="mcpSearchInput" placeholder="搜索 MCP 服务器...">
+                <select class="ds-type-filter" id="mcpTypeFilter">
+                  <option value="">全部类型</option>
+                  <option value="local">本地工具</option>
+                  <option value="web">网络服务</option>
+                  <option value="database">数据库</option>
+                  <option value="file">文件系统</option>
+                  <option value="api">API 接口</option>
+                </select>
+              </div>
+              <div class="mcp-list" id="mcpList"></div>
+              <button class="btn-add-model" id="addMcpBtn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                添加 MCP 服务器
+              </button>
+            </div>
+
+            <div class="kb-section">
+              <div class="market-section-header">
+                <div class="kb-section-title">MCP 市场</div>
+                <div class="market-admin-tools">
+                  <select class="ds-type-filter" id="mcpRoleMode">
+                    <option value="user">用户视图</option>
+                    <option value="admin">管理员视图</option>
+                  </select>
+                  <button class="btn-primary market-admin-only" id="addMcpMarketBtn" hidden>发布 MCP</button>
+                </div>
+              </div>
+              <div class="mcp-market-grid" id="mcpMarketGrid">
+                <div class="mcp-market-card">
+                  <div class="mcp-market-icon">&#x1F4DD;</div>
+                  <div class="mcp-market-name">File System</div>
+                  <div class="mcp-market-desc">本地文件读写、搜索、批量处理</div>
+                  <div class="mcp-market-tags"><span class="tag">文件系统</span><span class="tag">本地</span></div>
+                  <button class="btn-install-mcp" data-mcp="filesystem">安装</button>
+                </div>
+                <div class="mcp-market-card">
+                  <div class="mcp-market-icon">&#x1F4BE;</div>
+                  <div class="mcp-market-name">Database Tools</div>
+                  <div class="mcp-market-desc">执行 SQL、查询结构、导出结果</div>
+                  <div class="mcp-market-tags"><span class="tag">数据库</span><span class="tag">SQL</span></div>
+                  <button class="btn-install-mcp" data-mcp="database">安装</button>
+                </div>
+                <div class="mcp-market-card">
+                  <div class="mcp-market-icon">&#x1F310;</div>
+                  <div class="mcp-market-name">Web Browser</div>
+                  <div class="mcp-market-desc">网页抓取、内容解析、链接提取</div>
+                  <div class="mcp-market-tags"><span class="tag">网络</span><span class="tag">爬虫</span></div>
+                  <button class="btn-install-mcp" data-mcp="browser">安装</button>
+                </div>
+                <div class="mcp-market-card">
+                  <div class="mcp-market-icon">&#x1F4C8;</div>
+                  <div class="mcp-market-name">Excel/CSV</div>
+                  <div class="mcp-market-desc">读取写入 Excel、CSV 数据表格</div>
+                  <div class="mcp-market-tags"><span class="tag">文件</span><span class="tag">表格</span></div>
+                  <button class="btn-install-mcp" data-mcp="excel">安装</button>
+                </div>
+                <div class="mcp-market-card">
+                  <div class="mcp-market-icon">&#x1F3AC;</div>
+                  <div class="mcp-market-name">PPT Generation</div>
+                  <div class="mcp-market-desc">自动生成 PowerPoint 演示文稿</div>
+                  <div class="mcp-market-tags"><span class="tag">Office</span><span class="tag">PPT</span></div>
+                  <button class="btn-install-mcp" data-mcp="ppt">安装</button>
+                </div>
+                <div class="mcp-market-card">
+                  <div class="mcp-market-icon">&#x1F50D;</div>
+                  <div class="mcp-market-name">Search API</div>
+                  <div class="mcp-market-desc">集成 Google/Bing/百度搜索接口</div>
+                  <div class="mcp-market-tags"><span class="tag">API</span><span class="tag">搜索</span></div>
+                  <button class="btn-install-mcp" data-mcp="search">安装</button>
+                </div>
+                <div class="mcp-market-card">
+                  <div class="mcp-market-icon">&#x1F4E6;</div>
+                  <div class="mcp-market-name">Email</div>
+                  <div class="mcp-market-desc">发送邮件、读取收件箱、附件处理</div>
+                  <div class="mcp-market-tags"><span class="tag">API</span><span class="tag">邮件</span></div>
+                  <button class="btn-install-mcp" data-mcp="email">安装</button>
+                </div>
+                <div class="mcp-market-card">
+                  <div class="mcp-market-icon">&#x1F680;</div>
+                  <div class="mcp-market-name">GitHub</div>
+                  <div class="mcp-market-desc">操作 GitHub 仓库、Issue、PR</div>
+                  <div class="mcp-market-tags"><span class="tag">API</span><span class="tag">开发</span></div>
+                  <button class="btn-install-mcp" data-mcp="github">安装</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+
+          <!-- Skill 市场内容 -->
+          <div class="modal-panel" id="panel-skill">
+            <div class="panel-desc">用户可创建自己的 Skill 或从市场安装；管理员负责 Skill 市场的发布、修改、上线与下线。</div>
+            <div class="kb-section">
+              <div class="kb-section-title">我的 Skill</div>
+              <div class="skill-search-bar">
+                <input class="ds-search-input" type="text" id="skillSearchInput" placeholder="搜索 Skill...">
+              </div>
+              <div class="skill-list" id="skillList">
+                <div class="doc-empty-hint">暂未安装任何 Skill，请从下方市场安装。</div>
+              </div>
+              <button class="btn-add-model" id="addSkillBtn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                自定义 Skill
+              </button>
+            </div>
+
+            <div class="kb-section">
+              <div class="market-section-header">
+                <div class="kb-section-title">Skill 市场</div>
+                <div class="market-admin-tools">
+                  <select class="ds-type-filter" id="skillRoleMode">
+                    <option value="user">用户视图</option>
+                    <option value="admin">管理员视图</option>
+                  </select>
+                  <button class="btn-primary market-admin-only" id="addSkillMarketBtn" hidden>发布 Skill</button>
+                </div>
+              </div>
+              <div class="skill-category-label">数据分析</div>
+              <div class="skill-market-grid">
+                <div class="skill-market-card">
+                  <div class="skill-market-header">
+                    <span class="skill-market-icon">&#x1F4CA;</span>
+                    <span class="skill-market-name">SQL 查询分析器</span>
+                  </div>
+                  <div class="skill-market-desc">自然语言转 SQL，自动生成查询、解释结果、导出报告</div>
+                  <div class="skill-market-tags"><span class="tag">SQL</span><span class="tag">数据分析</span></div>
+                  <div class="skill-market-meta">v1.2 · 作者：社区</div>
+                  <button class="btn-install-skill" data-skill="sql-analyzer">安装</button>
+                </div>
+                <div class="skill-market-card">
+                  <div class="skill-market-header">
+                    <span class="skill-market-icon">&#x1F4C8;</span>
+                    <span class="skill-market-name">报表生成器</span>
+                  </div>
+                  <div class="skill-market-desc">根据数据自动生成可视化报表，支持折线图、柱状图、饼图</div>
+                  <div class="skill-market-tags"><span class="tag">可视化</span><span class="tag">报表</span></div>
+                  <div class="skill-market-meta">v2.0 · 作者：官方</div>
+                  <button class="btn-install-skill" data-skill="report-gen">安装</button>
+                </div>
+                <div class="skill-market-card">
+                  <div class="skill-market-header">
+                    <span class="skill-market-icon">&#x1F3AF;</span>
+                    <span class="skill-market-name">指标计算器</span>
+                  </div>
+                  <div class="skill-market-desc">计算同比、环比、增长率、排名等业务指标</div>
+                  <div class="skill-market-tags"><span class="tag">指标</span><span class="tag">BI</span></div>
+                  <div class="skill-market-meta">v1.0 · 作者：社区</div>
+                  <button class="btn-install-skill" data-skill="metric-calc">安装</button>
+                </div>
+              </div>
+
+              <div class="skill-category-label" style="margin-top:16px">文档处理</div>
+              <div class="skill-market-grid">
+                <div class="skill-market-card">
+                  <div class="skill-market-header">
+                    <span class="skill-market-icon">&#x1F4DD;</span>
+                    <span class="skill-market-name">合同审核助手</span>
+                  </div>
+                  <div class="skill-market-desc">自动识别合同关键条款，标注风险点，生成审核意见</div>
+                  <div class="skill-market-tags"><span class="tag">法务</span><span class="tag">NLP</span></div>
+                  <div class="skill-market-meta">v1.5 · 作者：官方</div>
+                  <button class="btn-install-skill" data-skill="contract-review">安装</button>
+                </div>
+                <div class="skill-market-card">
+                  <div class="skill-market-header">
+                    <span class="skill-market-icon">&#x1F4D6;</span>
+                    <span class="skill-market-name">文档摘要生成</span>
+                  </div>
+                  <div class="skill-market-desc">对长文档生成摘要、提取关键信息、支持多语言</div>
+                  <div class="skill-market-tags"><span class="tag">NLP</span><span class="tag">摘要</span></div>
+                  <div class="skill-market-meta">v1.1 · 作者：社区</div>
+                  <button class="btn-install-skill" data-skill="doc-summary">安装</button>
+                </div>
+                <div class="skill-market-card">
+                  <div class="skill-market-header">
+                    <span class="skill-market-icon">&#x1F50D;</span>
+                    <span class="skill-market-name">智能问答</span>
+                  </div>
+                  <div class="skill-market-desc">基于知识库进行精确问答，支持多轮对话、溯源</div>
+                  <div class="skill-market-tags"><span class="tag">RAG</span><span class="tag">问答</span></div>
+                  <div class="skill-market-meta">v2.1 · 作者：官方</div>
+                  <button class="btn-install-skill" data-skill="smart-qa">安装</button>
+                </div>
+              </div>
+
+              <div class="skill-category-label" style="margin-top:16px">业务自动化</div>
+              <div class="skill-market-grid">
+                <div class="skill-market-card">
+                  <div class="skill-market-header">
+                    <span class="skill-market-icon">&#x1F4E7;</span>
+                    <span class="skill-market-name">邮件处理</span>
+                  </div>
+                  <div class="skill-market-desc">自动分类、提取、回复邮件，生成待办事项</div>
+                  <div class="skill-market-tags"><span class="tag">自动化</span><span class="tag">邮件</span></div>
+                  <div class="skill-market-meta">v1.3 · 作者：社区</div>
+                  <button class="btn-install-skill" data-skill="email-proc">安装</button>
+                </div>
+                <div class="skill-market-card">
+                  <div class="skill-market-header">
+                    <span class="skill-market-icon">&#x1F4AC;</span>
+                    <span class="skill-market-name">会议纪要生成</span>
+                  </div>
+                  <div class="skill-market-desc">接入会议转录，生成结构化会议纪要和待办</div>
+                  <div class="skill-market-tags"><span class="tag">办公</span><span class="tag">自动化</span></div>
+                  <div class="skill-market-meta">v1.0 · 作者：官方</div>
+                  <button class="btn-install-skill" data-skill="meeting-notes">安装</button>
+                </div>
+                <div class="skill-market-card">
+                  <div class="skill-market-header">
+                    <span class="skill-market-icon">&#x1F4B0;</span>
+                    <span class="skill-market-name">财务对账</span>
+                  </div>
+                  <div class="skill-market-desc">自动核对账目，生成差异报告，标注异常项</div>
+                  <div class="skill-market-tags"><span class="tag">财务</span><span class="tag">对账</span></div>
+                  <div class="skill-market-meta">v1.1 · 作者：社区</div>
+                  <button class="btn-install-skill" data-skill="finance-check">安装</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        <!-- ========== Tool 设置面板 ========== -->
+        <div class="modal-panel" id="panel-tool">
+          <div class="panel-desc">管理对话可用工具：SQL、知识检索、流水线（创建/同步/加工/定时/日志）与 MCP。</div>
+
+          <div class="kb-section">
+            <div class="kb-section-title">通用设置</div>
+            <div class="tool-setting-card">
+              <label class="tool-switch-row">
+                <span>
+                  <strong>在对话中启用 Tool</strong>
+                  <small>关闭后即使选择了数据源，也不会进入工具调用循环</small>
+                </span>
+                <input type="checkbox" id="toolEnabledMaster" checked>
+              </label>
+              <div class="form-group" style="margin-bottom:0">
+                <label class="form-label" for="toolMaxRounds">最大工具调用轮数</label>
+                <input class="form-input" type="number" id="toolMaxRounds" min="1" max="10" value="6" style="max-width:120px">
+                <div class="form-help">单轮对话中模型可连续调用工具的最大次数（1–10）</div>
+              </div>
+              <label class="tool-switch-row" style="margin-top:12px">
+                <span>
+                  <strong>显示思考过程入口</strong>
+                  <small>回复上方显示可折叠的思考框；默认收起，点击可查看推理与工具命令</small>
+                </span>
+                <input type="checkbox" id="toolShowTraces" checked>
+              </label>
+            </div>
+          </div>
+
+          <div class="kb-section">
+            <div class="kb-section-title">扩展来源</div>
+            <div class="tool-setting-card">
+              <label class="tool-switch-row">
+                <span>
+                  <strong>允许接入已启用的 MCP 工具</strong>
+                  <small>将「MCP 管理」中生效且已配置 URL 的服务器工具合并进对话（stdio 暂不支持）</small>
+                </span>
+                <input type="checkbox" id="toolAllowMcp">
+              </label>
+              <label class="tool-switch-row">
+                <span>
+                  <strong>允许流水线工具</strong>
+                  <small>允许对话调用 list/run/get 流水线工具（执行会真实跑数，请谨慎）</small>
+                </span>
+                <input type="checkbox" id="toolAllowPipeline">
+              </label>
+            </div>
+          </div>
+
+          <div class="kb-section">
+            <div class="market-section-header">
+              <div class="kb-section-title">内置工具</div>
+              <div class="tool-builtin-actions">
+                <span class="tool-builtin-summary" id="toolBuiltinSummary">0 / 0 启用</span>
+                <button class="btn-secondary" id="toolEnableAllBtn" type="button">全部启用</button>
+                <button class="btn-secondary" id="toolDisableAllBtn" type="button">全部停用</button>
+                <button class="btn-secondary" id="toolResetBtn" type="button">恢复默认</button>
+              </div>
+            </div>
+            <div class="tool-builtin-toolbar">
+              <input class="ds-search-input" type="text" id="toolSearchInput" placeholder="搜索工具名称、函数名或说明...">
+              <select class="ds-type-filter" id="toolSourceFilter">
+                <option value="">全部分类</option>
+                <option value="数据源">数据源</option>
+                <option value="知识库">知识库</option>
+                <option value="流水线">流水线</option>
+              </select>
+            </div>
+            <div class="tool-list" id="toolBuiltinList"></div>
+          </div>
+
+          <div class="add-model-footer" style="justify-content:flex-end;margin-top:8px;padding:0;border:0">
+            <button class="btn-primary" id="saveToolSettingsBtn" type="button">保存 Tool 设置</button>
+          </div>
+        </div>
+
+        <!-- ========== API 设置面板 ========== -->
+        <div class="modal-panel" id="panel-api">
+          <div class="panel-desc">配置 API 请求参数和代理设置。</div>
+          <div class="form-group">
+            <label class="form-label">请求超时（秒）</label>
+            <input class="form-input" type="number" value="60" min="10" max="300">
+          </div>
+          <div class="form-group">
+            <label class="form-label">代理地址</label>
+            <input class="form-input" type="text" placeholder="http://127.0.0.1:7890（可选）">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Base URL</label>
+            <input class="form-input" type="text" placeholder="https://api.openai.com/v1（可选）">
+          </div>
+        </div>
+
+        <!-- ========== 数据处理面板 ========== -->
+        <div class="modal-panel" id="panel-dataprocess">
+          <div class="dp-panel-header">
+            <div>
+              <div class="panel-desc" style="margin:0">管理流水线任务：数据同步、数据处理、定时调度与执行日志。</div>
+              <div class="dp-stat-row" id="dpStatRow">
+                <span>任务 0</span>
+                <span>已调度 0</span>
+                <span>最近成功 0</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="kb-sub-nav">
+            <button class="kb-sub-nav-item active" data-dp-tab="tasks" type="button">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              流水线任务
+            </button>
+            <button class="kb-sub-nav-item" data-dp-tab="logs" type="button">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              执行日志
+            </button>
+          </div>
+
+          <!-- ========== 流水线任务 ========== -->
+          <div class="kb-tab-content active" id="dp-tab-tasks">
+            <div class="dp-quick-actions">
+              <button class="dp-quick-btn" type="button" id="dpQuickSyncBtn">
+                <strong>数据同步</strong>
+                <small>源表 → 目标表</small>
+              </button>
+              <button class="dp-quick-btn" type="button" id="dpQuickProcessBtn">
+                <strong>数据处理</strong>
+                <small>库内加工 SQL</small>
+              </button>
+              <button class="dp-quick-btn" type="button" id="addTaskBtn">
+                <strong>空白流水线</strong>
+                <small>自定义多步骤</small>
+              </button>
+              <button class="dp-quick-btn" type="button" id="createAbcdTplBtn">
+                <strong>A+B→C→D</strong>
+                <small>跨库 ETL 模板</small>
+              </button>
+            </div>
+
+            <div class="dp-filter-bar">
+              <input class="ds-search-input" type="text" id="taskSearchInput" placeholder="搜索任务名称、说明...">
+              <select class="ds-type-filter" id="taskTypeFilter">
+                <option value="">全部类型</option>
+                <option value="sync">数据同步</option>
+                <option value="process">数据处理</option>
+                <option value="pipeline">综合流水线</option>
+              </select>
+              <select class="ds-type-filter" id="taskScheduleFilter">
+                <option value="">调度不限</option>
+                <option value="scheduled">已配置定时</option>
+                <option value="enabled">定时已启用</option>
+              </select>
+            </div>
+
+            <div class="task-list" id="taskList"></div>
+          </div>
+
+          <!-- ========== 执行日志 ========== -->
+          <div class="kb-tab-content" id="dp-tab-logs">
+            <div class="dp-filter-bar">
+              <select class="ds-type-filter" id="execStatusFilter">
+                <option value="">全部状态</option>
+                <option value="success">成功</option>
+                <option value="failed">失败</option>
+                <option value="running">运行中</option>
+              </select>
+              <input class="ds-search-input" type="text" id="execLogSearchInput" placeholder="搜索流水线名或日志关键字...">
+              <button class="btn-secondary" id="refreshExecLogBtn" type="button">刷新</button>
+            </div>
+            <div class="exec-log-list" id="execLogList"></div>
+          </div>
+        </div>
+
+
+        <!-- ========== 权限与审计面板 ========== -->
+        <div class="modal-panel" id="panel-permission">
+          <div class="panel-desc">管理角色权限、流水线审批与操作审计。会话创建的流水线需审批通过后才会生效执行。</div>
+
+          <section class="perm-identity-card" aria-label="当前身份">
+            <div class="perm-identity-main">
+              <div class="perm-identity-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <div class="perm-identity-copy">
+                <strong>当前身份</strong>
+                <small>管理员可批准或驳回待生效流水线；普通用户仅可查看。</small>
+              </div>
+            </div>
+            <div class="perm-role-toggle" id="platformRoleToggle" role="group" aria-label="切换身份">
+              <button type="button" class="perm-role-opt" data-role="user">普通用户</button>
+              <button type="button" class="perm-role-opt" data-role="admin">管理员</button>
+            </div>
+          </section>
+
+          <nav class="perm-tabs" aria-label="权限模块">
+            <button class="perm-tab active" data-perm-tab="approval" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              <span>任务审批</span>
+              <em class="perm-tab-count" id="approvalPendingCount">0</em>
+            </button>
+            <button class="perm-tab" data-perm-tab="tenant" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span>租户管理</span>
+            </button>
+            <button class="perm-tab" data-perm-tab="matrix" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+              <span>权限矩阵</span>
+            </button>
+            <button class="perm-tab" data-perm-tab="audit" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              <span>审计日志</span>
+            </button>
+          </nav>
+
+          <!-- ========== 任务审批 ========== -->
+          <div class="kb-tab-content active" id="perm-tab-approval">
+            <div class="perm-panel-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>流水线审批</h3>
+                  <p>审批通过后任务状态变为已生效，方可执行。</p>
+                </div>
+                <div class="perm-toolbar">
+                  <select class="ds-type-filter" id="approvalStatusFilter">
+                    <option value="pending_approval">待审批</option>
+                    <option value="rejected">已驳回</option>
+                    <option value="active">已生效</option>
+                    <option value="">全部</option>
+                  </select>
+                  <button class="btn-secondary" id="refreshApprovalBtn" type="button">刷新</button>
+                </div>
+              </div>
+              <div class="approval-admin-hint" id="approvalAdminHint">当前为普通用户视图，仅可查看；切换为管理员后可批准 / 驳回。</div>
+              <div class="approval-list" id="approvalList"></div>
+            </div>
+          </div>
+
+          <!-- ========== 租户管理 ========== -->
+          <div class="kb-tab-content" id="perm-tab-tenant">
+            <div class="perm-panel-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>租户管理</h3>
+                  <p>按租户隔离资源与权限边界。</p>
+                </div>
+                <div class="perm-toolbar">
+                  <input class="ds-search-input" type="text" id="tenantSearchInput" placeholder="搜索租户名称...">
+                  <select class="ds-type-filter" id="tenantStatusFilter">
+                    <option value="">全部状态</option>
+                    <option value="active">启用</option>
+                    <option value="inactive">停用</option>
+                  </select>
+                  <button class="btn-primary" id="addTenantBtn" type="button">新增租户</button>
+                </div>
+              </div>
+              <div class="tenant-list" id="tenantList">
+                <div class="perm-empty">
+                  <div class="perm-empty-icon" aria-hidden="true">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                  </div>
+                  <h4>暂无租户数据</h4>
+                  <p>租户能力预留中，可先通过「当前身份」与任务审批完成流程控制。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ========== 权限矩阵 ========== -->
+          <div class="kb-tab-content" id="perm-tab-matrix">
+            <div class="perm-panel-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>权限矩阵</h3>
+                  <p>按角色配置模块读写与危险操作权限。</p>
+                </div>
+                <div class="perm-toolbar">
+                  <select class="ds-type-filter" id="permTenantSelect">
+                    <option value="">选择租户...</option>
+                  </select>
+                  <button class="btn-primary" id="savePermBtn" type="button">保存权限</button>
+                </div>
+              </div>
+              <div class="perm-matrix-wrap" id="permMatrixWrap">
+                <div class="perm-empty">
+                  <div class="perm-empty-icon" aria-hidden="true">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                  </div>
+                  <h4>请先选择租户</h4>
+                  <p>选择租户后将展示角色 × 资源的权限矩阵。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ========== 审计日志 ========== -->
+          <div class="kb-tab-content" id="perm-tab-audit">
+            <div class="perm-panel-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>审计日志</h3>
+                  <p>记录审批与关键安全操作，便于追溯。</p>
+                </div>
+                <div class="perm-toolbar">
+                  <input class="ds-search-input" type="text" id="auditSearchInput" placeholder="搜索操作内容...">
+                  <select class="ds-type-filter" id="auditTypeFilter">
+                    <option value="">全部类型</option>
+                    <option value="auth">认证</option>
+                    <option value="perm">权限</option>
+                    <option value="data">数据访问</option>
+                    <option value="config">配置变更</option>
+                    <option value="danger">危险操作</option>
+                  </select>
+                  <button class="btn-secondary" id="exportAuditBtn" type="button">导出</button>
+                </div>
+              </div>
+              <div class="audit-list" id="auditList"></div>
+            </div>
+          </div>
+        </div>
+
+
+
+        <!-- ========== 数据输出面板 ========== -->
+        <div class="modal-panel" id="panel-dataoutput">
+          <div class="panel-desc">配置数据输出目的地，支持将处理后的数据写入目标数据库或直接下载为文件。</div>
+
+          <!-- 左侧子导航 -->
+          <div class="kb-sub-nav">
+            <button class="kb-sub-nav-item active" data-do-tab="output">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              输出任务
+            </button>
+            <button class="kb-sub-nav-item" data-do-tab="target">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              目标数据库
+            </button>
+            <button class="kb-sub-nav-item" data-do-tab="download">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              文件下载
+            </button>
+            <button class="kb-sub-nav-item" data-do-tab="history">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              输出历史
+            </button>
+
+            <button class="kb-sub-nav-item" data-do-tab="compliance">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+              合规性
+            </button>
+          </div>
+
+
+          <!-- ========== 合规性 ========== -->
+          <div class="kb-tab-content" id="do-tab-compliance">
+            <div class="perm-toolbar">
+              <select class="ds-type-filter" id="complianceTypeFilter">
+                <option value="">全部类型</option>
+                <option value="sensitive">敏感字段</option>
+                <option value="format">格式校验</option>
+                <option value="range">范围校验</option>
+                <option value="custom">自定义规则</option>
+              </select>
+              <button class="btn-add-model" id="addComplianceRuleBtn" style="margin-left:auto">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                新建规则
+              </button>
+            </div>
+
+            <!-- 合规规则列表 -->
+            <div class="compliance-rules-section">
+              <div class="compliance-rules-header">
+                <span>规则名称</span>
+                <span>类型</span>
+                <span>匹配模式</span>
+                <span>动作</span>
+                <span>状态</span>
+                <span>操作</span>
+              </div>
+              <div class="compliance-rules-body" id="complianceRulesBody">
+              </div>
+            </div>
+
+            <!-- 合规预览 -->
+            <div class="compliance-preview-section">
+              <div class="kb-section-title">&#x1F50D; 合规校验预览</div>
+              <div class="compliance-preview-form">
+                <div class="form-group">
+                  <label class="form-label">输入待检测文本</label>
+                  <textarea class="form-textarea" id="complianceTestInput" rows="3" placeholder="粘贴待检测的数据内容，例如包含身份证号、手机号、敏感ID的文本..."></textarea>
+                </div>
+                <div class="compliance-preview-actions">
+                  <button class="btn-preview" id="btnRunComplianceCheck">&#x26A0; 运行合规检查</button>
+                </div>
+                <div class="compliance-check-result" id="complianceCheckResult">
+                  <div class="compliance-check-placeholder">运行合规检查后可在此查看结果</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 合规统计 -->
+            <div class="compliance-stats-section">
+              <div class="kb-section-title">&#x1F4CA; 合规统计概览</div>
+              <div class="compliance-stats-grid" id="complianceStatsGrid">
+              </div>
+            </div>
+          </div>
+
+
+          <!-- ========== 输出任务 ========== -->
+          <div class="kb-tab-content active" id="do-tab-output">
+            <div class="perm-toolbar">
+              <input class="ds-search-input" type="text" id="outputSearchInput" placeholder="搜索输出任务..." style="max-width:200px">
+              <select class="ds-type-filter" id="outputStatusFilter">
+                <option value="">全部状态</option>
+                <option value="idle">待执行</option>
+                <option value="running">执行中</option>
+                <option value="success">成功</option>
+                <option value="failed">失败</option>
+              </select>
+              <button class="btn-add-model" id="addOutputBtn" style="margin-left:auto">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                新建输出任务
+              </button>
+            </div>
+            <div class="output-task-list" id="outputTaskList"></div>
+          </div>
+
+          <!-- ========== 目标数据库 ========== -->
+          <div class="kb-tab-content" id="do-tab-target">
+            <div class="perm-toolbar">
+              <input class="ds-search-input" type="text" id="targetSearchInput" placeholder="搜索目标库..." style="max-width:200px">
+              <button class="btn-add-model" id="addTargetBtn" style="margin-left:auto">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                添加目标库
+              </button>
+            </div>
+            <div class="output-target-list" id="outputTargetList"></div>
+          </div>
+
+          <!-- ========== 文件下载 ========== -->
+          <div class="kb-tab-content" id="do-tab-download">
+            <div class="perm-toolbar">
+              <select class="ds-type-filter" id="downloadFormatSelect" style="max-width:160px">
+                <option value="csv">CSV</option>
+                <option value="xlsx">Excel (.xlsx)</option>
+                <option value="json">JSON</option>
+                <option value="parquet">Parquet</option>
+                <option value="sql">SQL INSERT</option>
+              </select>
+              <select class="ds-type-filter" id="downloadEncodingSelect" style="max-width:140px">
+                <option value="utf8">UTF-8 编码</option>
+                <option value="gbk">GBK 编码</option>
+              </select>
+              <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:5px">
+                <input type="checkbox" id="includeHeadersCheck" checked style="accent-color:var(--accent-color)">
+                包含表头
+              </label>
+            </div>
+            <div class="download-preview">
+              <div class="download-preview-header">
+                <div class="download-preview-title">&#x1F4C4; 数据下载配置</div>
+                <div class="download-preview-desc">选择要导出的数据范围与格式</div>
+              </div>
+              <div class="download-form">
+                <div class="form-group">
+                  <label class="form-label">数据来源</label>
+                  <select class="form-select" id="downloadSourceSelect">
+                    <option value="">选择数据源...</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">查询语句 / 表名</label>
+                  <textarea class="form-textarea" id="downloadQueryInput" placeholder="输入 SQL 查询语句或表名，如：SELECT * FROM sales WHERE date >= '2024-01-01'" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">输出文件名</label>
+                  <input class="form-input" type="text" id="downloadFileName" placeholder="report_2024" style="max-width:300px">
+                  <span style="font-size:12px;color:var(--text-muted);margin-left:8px" id="downloadExtHint">.csv</span>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">最大行数</label>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <input class="form-input" type="number" id="downloadMaxRows" value="10000" min="1" max="1000000" style="max-width:150px">
+                    <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:5px">
+                      <input type="checkbox" id="downloadAllRows" style="accent-color:var(--accent-color)">
+                      导出全部
+                    </label>
+                  </div>
+                </div>
+                <div class="download-actions">
+                  <button class="btn-preview" id="btnPreviewDownload">&#x1F50D; 预览数据</button>
+                  <button class="btn-download-now" id="btnDownloadNow">&#x2B07; 下载文件</button>
+                </div>
+                <div class="download-preview-result" id="downloadPreviewResult"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ========== 输出历史 ========== -->
+          <div class="kb-tab-content" id="do-tab-history">
+            <div class="perm-toolbar">
+              <input class="ds-search-input" type="text" id="historySearchInput" placeholder="搜索任务/结果..." style="max-width:200px">
+              <select class="ds-type-filter" id="historyTypeFilter">
+                <option value="">全部类型</option>
+                <option value="db">数据库写入</option>
+                <option value="file">文件下载</option>
+              </select>
+              <button class="btn-add-model" id="exportHistoryBtn" style="margin-left:auto">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                导出历史
+              </button>
+            </div>
+            <div class="output-history-list" id="outputHistoryList"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ========== 添加模型弹窗 ========== -->
+  <div class="modal-overlay" id="addModelModal">
+    <div class="app-dialog modal-add-model">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title">添加模型</span>
+          <span class="app-dialog__subtitle">接入第三方大模型并设为可用</span>
+        </div>
+        <button class="modal-close" id="closeAddModel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <div class="form-group">
+          <label class="form-label">选择厂商</label>
+          <div class="provider-grid" id="providerGrid"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">供应商名称</label>
+          <input class="form-input" type="text" id="modelProviderName" placeholder="选择厂商后自动填充，可修改">
+        </div>
+        <div class="form-group">
+          <label class="form-label">模型名称</label>
+          <input class="form-input" type="text" id="modelName" placeholder="如：gpt-4o、claude-3-5-sonnet">
+        </div>
+        <div class="form-group">
+          <label class="form-label">显示名称 <span style="color:var(--muted);font-weight:400">(可选)</span></label>
+          <input class="form-input" type="text" id="modelDisplayName" placeholder="用于界面显示，留空则用模型名称">
+        </div>
+        <div class="form-group">
+          <label class="form-label">官方连接 (Base URL)</label>
+          <input class="form-input" type="text" id="modelBaseUrl" placeholder="选择厂商后自动填充官方地址">
+        </div>
+        <div class="form-group">
+          <label class="form-label">API Key</label>
+          <div class="api-key-input-wrap">
+            <input class="form-input" type="password" id="modelApiKey" placeholder="sk-..." style="flex:1">
+            <button class="btn-show-key" id="toggleApiKey" type="button" title="显示/隐藏">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="add-model-test" id="addModelTestResult" hidden></div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelAddModel">取消</button>
+        <button class="btn-ghost" id="testModelBtn" type="button">测试连接</button>
+        <button class="btn-primary" id="saveModelBtn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 添加 / 修改 MCP 弹窗 ========== -->
+  <div class="modal-overlay" id="addMcpModal">
+    <div class="app-dialog app-dialog--md modal-add-model modal-add-mcp">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="mcpModalTitle">添加 MCP 服务器</span>
+          <span class="app-dialog__subtitle">配置工具服务器供对话调用</span>
+        </div>
+        <button class="modal-close" id="closeAddMcp">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <div class="form-group">
+          <label class="form-label">名称</label>
+          <input class="form-input" id="mcpName" placeholder="如：企业数据库 MCP">
+        </div>
+        <div class="form-group">
+          <label class="form-label">描述</label>
+          <textarea class="form-textarea" id="mcpDescription" rows="2" placeholder="说明该 MCP 提供的工具和使用场景"></textarea>
+        </div>
+        <div class="form-group">
+          <div class="mcp-json-label">
+            <label class="form-label">mcp.json</label>
+            <button class="btn-text" id="formatMcpJsonBtn" type="button">格式化 JSON</button>
+          </div>
+          <textarea class="form-textarea mcp-json-editor" id="mcpJson" spellcheck="false" placeholder='{"mcpServers":{"my-server":{"url":"http://localhost:3000/mcp"}}}'></textarea>
+          <div class="form-help">支持 HTTP/SSE 的 url、headers，或 stdio 的 command、args、env 配置。</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">状态</label>
+          <div class="status-option-group">
+            <label class="status-option active">
+              <input type="radio" name="mcpEnabled" value="true" checked>
+              <span><strong>生效</strong><small>允许 AI 调用该 MCP</small></span>
+            </label>
+            <label class="status-option">
+              <input type="radio" name="mcpEnabled" value="false">
+              <span><strong>失效</strong><small>保留配置但停止调用</small></span>
+            </label>
+          </div>
+        </div>
+        <div class="add-model-test" id="mcpTestResult" hidden></div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelAddMcp">取消</button>
+        <button class="btn-ghost" id="testMcpBtn" type="button">校验并测试连接</button>
+        <button class="btn-primary" id="saveMcpBtn" disabled>保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 添加 / 修改 Skill 弹窗 ========== -->
+  <div class="modal-overlay" id="addSkillModal">
+    <div class="app-dialog app-dialog--md modal-add-model modal-add-skill">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="skillModalTitle">新建 Skill</span>
+          <span class="app-dialog__subtitle">填写名称与执行说明，保存后可在对话中使用</span>
+        </div>
+        <button class="modal-close" id="closeAddSkill" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <div class="form-group">
+          <label class="form-label" for="skillName">名称</label>
+          <input class="form-input" id="skillName" placeholder="如：合同风险审查">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="skillDescription">功能说明</label>
+          <textarea class="form-textarea" id="skillDescription" rows="2" placeholder="简要说明该 Skill 的用途与适用场景"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="skillPrompt">Skill Prompt / 执行说明</label>
+          <textarea class="form-textarea skill-prompt-editor" id="skillPrompt" rows="9" spellcheck="false" placeholder="写明角色、步骤、输入输出要求，例如：&#10;你是一名数据分析助手。&#10;1. 先确认用户目标&#10;2. 用工具查询数据&#10;3. 给出结论与建议"></textarea>
+          <div class="form-help">支持多行；描述越清晰，模型执行越稳定。</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">状态</label>
+          <div class="status-option-group">
+            <label class="status-option active">
+              <input type="radio" name="skillEnabled" value="true" checked>
+              <span><strong>生效</strong><small>允许在对话中使用</small></span>
+            </label>
+            <label class="status-option">
+              <input type="radio" name="skillEnabled" value="false">
+              <span><strong>停用</strong><small>保留配置但不参与调用</small></span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelAddSkill" type="button">取消</button>
+        <button class="btn-primary" id="saveSkillBtn" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 添加数据源弹窗 ========== -->
+  <div class="modal-overlay" id="addDsModal">
+    <div class="app-dialog modal-add-model">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="addDsModalTitle">添加数据源</span>
+          <span class="app-dialog__subtitle" id="addDsModalSubtitle">保存连接信息，供查询与流水线使用</span>
+        </div>
+        <button class="modal-close" id="closeAddDs">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <div class="form-group">
+          <label class="form-label">数据源类型</label>
+          <select class="form-select" id="dsType">
+            <option value="">-- 选择类型 --</option>
+            <option value="mysql">MySQL</option>
+            <option value="hive">Apache Hive</option>
+            <option value="spark">Apache Spark Thrift Server</option>
+            <option value="kafka">Apache Kafka</option>
+            <option value="postgres">PostgreSQL</option>
+            <option value="mongodb">MongoDB</option>
+            <option value="clickhouse">ClickHouse</option>
+            <option value="oracle">Oracle</option>
+            <option value="sqlserver">SQL Server</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">数据源名称</label>
+          <input class="form-input" type="text" id="dsName" placeholder="如：生产环境 MySQL">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Host</label>
+          <input class="form-input" type="text" id="dsHost" placeholder="如：localhost 或 192.168.1.100">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">端口</label>
+            <input class="form-input" type="number" id="dsPort" placeholder="3306">
+          </div>
+          <div class="form-group">
+            <label class="form-label">数据库名</label>
+            <input class="form-input" type="text" id="dsDatabase" placeholder="如：report_db">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">用户名</label>
+            <input class="form-input" type="text" id="dsUser" placeholder="root">
+          </div>
+          <div class="form-group">
+            <label class="form-label">密码</label>
+            <input class="form-input" type="password" id="dsPassword" placeholder="????????">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">额外参数 <span style="color:var(--muted);font-weight:400">(可选)</span></label>
+          <input class="form-input" type="text" id="dsExtra" placeholder="如：useSSL=false&amp;serverTimezone=UTC">
+        </div>
+        <div class="form-group">
+          <label class="form-label">权限确认</label>
+          <label class="ds-perm-card" for="dsQueryOnly">
+            <input type="checkbox" id="dsQueryOnly" checked>
+            <span class="ds-perm-card__body">
+              <strong>仅查询权限</strong>
+              <small>开启后禁止对该库执行写入、同步装载与库内加工 SQL；对话与流水线中仅可查询。需要作为写入目标时请关闭此项。</small>
+            </span>
+          </label>
+        </div>
+        <div class="form-group" id="dsKerberosGroup" style="display:none">
+          <label class="form-label">Kerberos 认证 <span style="color:var(--muted);font-weight:400">(可选)</span></label>
+          <textarea class="form-input" id="dsKerberos" rows="2" placeholder="krb5.conf 内容或路径..."></textarea>
+        </div>
+        <div class="form-group" id="dsJdbcGroup" style="display:none">
+          <label class="form-label">JDBC URL <span style="color:var(--muted);font-weight:400">(可选，覆盖以上配置)</span></label>
+          <input class="form-input" type="text" id="dsJdbcUrl" placeholder="jdbc:hive2://host:10000/default;auth=kerberos">
+        </div>
+        <div class="add-model-test" id="addDsTestResult" hidden></div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelAddDs">取消</button>
+        <button class="btn-ghost" id="testDsBtn">测试连接</button>
+        <button class="btn-primary" id="saveDsBtn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 新增/编辑知识库配置弹窗 ========== -->
+  <div class="modal-overlay" id="createKbModal">
+    <div class="app-dialog app-dialog--md modal-add-model modal-create-kb">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="createKbModalTitle">新增知识库配置</span>
+          <span class="app-dialog__subtitle">选择接口知识库或自定义知识库</span>
+        </div>
+        <button class="modal-close" id="closeCreateKb" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <div class="form-group">
+          <label class="form-label" for="createKbType">知识库类型</label>
+          <select class="form-select" id="createKbType">
+            <option value="api">接口知识库配置</option>
+            <option value="self">自定义知识库配置</option>
+          </select>
+        </div>
+        <div id="createKbApiFormHost" class="kb-create-type-panel"></div>
+        <div id="createKbSelfFormHost" class="kb-create-type-panel" hidden></div>
+        <div id="createKbModalStatus" class="inline-status"></div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelCreateKb" type="button">取消</button>
+        <button class="btn-danger" id="deleteKbConfigBtn" type="button" hidden>删除</button>
+        <button class="btn-ghost" id="testCreateKbApi" type="button" hidden>测试连接</button>
+        <button class="btn-primary" id="submitCreateKb" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 自定义知识库详情弹窗 ========== -->
+  <div class="modal-overlay" id="kbDetailModal">
+    <div class="app-dialog app-dialog--xl modal-kb-detail">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="kbDetailModalTitle">知识库配置</span>
+          <span class="app-dialog__subtitle">文档、片段、索引与检索测试</span>
+        </div>
+        <button class="modal-close" id="closeKbDetail" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="kb-detail-modal-body">
+        <div class="kb-detail-pane" id="kbDetailPane">
+          <div class="doc-empty-hint">加载中...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 流水线编辑弹窗 ========== -->
+  <div class="modal-overlay" id="pipelineModal">
+    <div class="app-dialog app-dialog--lg">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="pipelineModalTitle">新建流水线</span>
+          <span class="app-dialog__subtitle" id="pipelineModalSubtitle">编排同步、加工与多步骤任务</span>
+        </div>
+        <button class="modal-close" id="closePipelineModal" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <input type="hidden" id="pipelineEditId" value="">
+        <div class="kb-config-stack">
+          <div class="kb-config-group">
+            <div class="kb-config-group-title">基本信息</div>
+            <label class="form-label" for="pipelineName">名称</label>
+            <input class="form-input" id="pipelineName" placeholder="如：工单宽表日批">
+            <label class="form-label" for="pipelineDesc">说明</label>
+            <textarea class="form-textarea" id="pipelineDesc" rows="2" placeholder="描述业务口径或同步规则"></textarea>
+            <div class="kb-config-row">
+              <div class="kb-config-field">
+                <label class="form-label" for="pipelineScheduleCron">定时 cron</label>
+                <input class="form-input" id="pipelineScheduleCron" placeholder="如 0 2 * * *">
+              </div>
+              <div class="kb-config-field">
+                <label class="form-label" for="pipelineExecDate">执行日期</label>
+                <input class="form-input" id="pipelineExecDate" placeholder="YYYY-MM-DD，SQL 可用 {exec_date}">
+              </div>
+            </div>
+            <label class="tool-switch-row" style="padding:8px 0;margin-top:4px">
+              <span>
+                <strong style="font-size:12px">启用定时任务</strong>
+                <small>保存调度配置，到点可配合外部调度或手动执行</small>
+              </span>
+              <input type="checkbox" id="pipelineScheduleEnabled">
+            </label>
+          </div>
+          <div class="kb-config-group">
+            <div class="kb-config-group-title" style="display:flex;justify-content:space-between;align-items:center;">
+              <span>步骤（按顺序执行）</span>
+              <button class="btn-secondary" type="button" id="addPipelineStepBtn">添加步骤</button>
+            </div>
+            <div id="pipelineStepsHost"></div>
+          </div>
+        </div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelPipelineModal" type="button">取消</button>
+        <button class="btn-primary" id="savePipelineBtn" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-toast-host" id="appToastHost" aria-live="polite"></div>
+
+  <!-- ========== 聊天提示弹窗 ========== -->
+  <div class="modal-overlay chat-notice-overlay" id="chatNoticeModal">
+    <div class="app-dialog chat-notice-dialog" role="dialog" aria-modal="true" aria-labelledby="chatNoticeTitle">
+      <div class="app-dialog__header add-model-header">
+        <div class="chat-notice-head">
+          <span class="chat-notice-icon" id="chatNoticeIcon" aria-hidden="true"></span>
+          <div>
+            <span class="app-dialog__title" id="chatNoticeTitle">提示</span>
+            <span class="app-dialog__subtitle" id="chatNoticeSubtitle">发送前需要完成配置</span>
+          </div>
+        </div>
+        <button class="modal-close" id="closeChatNotice" type="button" aria-label="关闭">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <p class="chat-notice-message" id="chatNoticeMessage"></p>
+        <div class="chat-notice-meta" id="chatNoticeMeta" hidden></div>
+      </div>
+      <div class="app-dialog__footer add-model-footer chat-notice-footer">
+        <button class="btn-secondary" id="chatNoticeCancel" type="button">知道了</button>
+        <button class="btn-primary" id="chatNoticeAction" type="button" hidden>去配置</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+﻿f=open(r" C:\\jinlujie\\code\\ai_platform\\web\\step2.py\,\w\,encoding=\utf-8\)\nf.close()\nprint(\step1 done\)
