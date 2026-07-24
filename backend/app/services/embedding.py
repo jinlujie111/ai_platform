@@ -63,5 +63,11 @@ def _error_message(data: dict[str, Any], status: int, raw: str) -> str:
     if isinstance(error, dict):
         detail = error.get("message") or error.get("msg") or str(error)
     else:
-        detail = error or data.get("message") or raw[:300] or "请求失败"
-    return f"Embedding HTTP {status}: {detail}"
+        detail = error or data.get("message") or data.get("detail") or raw[:300] or "请求失败"
+    message = f"Embedding HTTP {status}: {detail}"
+    if status == 401:
+        message += (
+            "。本地 Xinference 3+ 默认开启鉴权，请在知识库设置填写有效 Embedding API Key"
+            "（于 Xinference 控制台创建），或关闭鉴权后重试。"
+        )
+    return message

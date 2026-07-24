@@ -333,9 +333,15 @@ def build_datasource_context(datasources: list[DataSource]) -> str:
             f"host={ds.host}:{ds.port or '-'} | database={ds.database or '-'}"
         )
     lines.append(
-        "工作方式：优先结合知识库中的表/字段含义；需要真实数据时调用工具。"
-        "没有工具返回前，不得声称已查询成功。"
-        "标记为「仅查询」的数据源不得作为同步/加工写入目标。"
+        "强制规则（非常重要）：\n"
+        "1. 用户询问库表现状、配置值、计费、条数、金额、名单、是否存在某记录等"
+        "「需要真实数据」的问题时，必须先调用 list_tables / describe_table / run_readonly_sql"
+        "获取工具返回，再据此回答。\n"
+        "2. 知识库文档只可用于理解表结构、字段含义、业务口径或操作说明；"
+        "不得把文档示例、说明文字或自行推断当成已查询到的真实数据。\n"
+        "3. 没有工具返回前，禁止使用「查询结果如下」「当前配置是」「共有 N 条」等肯定表述；"
+        "若无法调用工具，必须明确说明「未实际查询数据库」。\n"
+        "4. 标记为「仅查询」的数据源不得作为同步/加工写入目标。"
     )
     return "\n".join(lines)
 
@@ -807,7 +813,7 @@ def _schedule_task(runtime: ToolRuntime, arguments: dict[str, Any]) -> dict[str,
     runtime.db.refresh(pipe)
     return {
         "ok": True,
-        "message": "定时任务已更新（当前版本保存调度配置；到点执行可配合外部调度或手动 run_pipeline）",
+        "message": "定时任务已更新；服务进程内调度器会在 cron 到点时自动执行（需 schedule_enabled=1 且 status=active）",
         "pipeline": _pipeline_brief(pipe),
     }
 
@@ -1088,13 +1094,24 @@ async def run_tool_chat(
 
     rounds = max(1, min(10, int(max_rounds or MAX_TOOL_ROUNDS)))
     system_prompt = SYSTEM_PROMPT
+    has_datasources = bool(datasources)
     if system_context:
-        system_prompt += (
-            "\n\n## 知识库上下文\n"
-            "仅依据下列检索内容回答与知识库相关的事实；信息不足时可调用 search_knowledge 补充。"
-            "引用事实时使用 [来源 N] 标记，不要编造来源。\n\n"
-            + system_context
-        )
+        if has_datasources:
+            system_prompt += (
+                "\n\n## 知识库参考（非实时数据）\n"
+                "下列内容来自文档检索，仅作口径/说明参考，不是数据库查询结果。"
+                "涉及表内真实数据、配置值、统计数字时，必须以 SQL 工具返回为准；"
+                "禁止仅凭下文文档或推断给出「实际情况」。"
+                "信息不足时可调用 search_knowledge 补充文档，但仍不能替代 SQL。\n\n"
+                + system_context
+            )
+        else:
+            system_prompt += (
+                "\n\n## 知识库上下文\n"
+                "仅依据下列检索内容回答与知识库相关的事实；信息不足时可调用 search_knowledge 补充。"
+                "引用事实时使用 [来源 N] 标记，不要编造来源。\n\n"
+                + system_context
+            )
     ds_context = build_datasource_context(datasources)
     if ds_context:
         system_prompt += "\n\n## 数据源与工具\n" + ds_context
@@ -1108,6 +1125,14 @@ async def run_tool_chat(
         system_prompt += f"\n\n## MCP 工具\n已接入 MCP：{names}。可通过 mcp__ 前缀工具调用。"
         if mcp_errors:
             system_prompt += "\n部分 MCP 加载失败：" + "；".join(mcp_errors)
+
+    if has_datasources:
+        # Nudge first-turn tool use for data questions without hard-forcing every reply.
+        system_prompt += (
+            "\n\n## 本轮执行优先级\n"
+            "若用户问题需要库内真实数据：先工具查询，后组织回答；"
+            "不要先写「实际情况」再补救承认未查库。"
+        )
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     if history:

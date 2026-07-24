@@ -29,6 +29,7 @@ from .services.vector_store import (
     delete_document_points,
     delete_knowledge_base_points,
 )
+from .services.web_page import fetch_web_page
 
 
 router = APIRouter(prefix="/api/knowledge-bases", tags=["knowledge-bases"])
@@ -151,6 +152,35 @@ def list_documents(knowledge_base_id: int, db: Session = Depends(get_db)):
     ]
 
 
+def _create_pending_document(
+    *,
+    db: Session,
+    knowledge_base_id: int,
+    filename: str,
+    stored_name: str,
+    content_type: str,
+    size: int,
+    background_tasks: BackgroundTasks,
+    embedding_api_key: str,
+    chroma_api_key: str,
+) -> dict:
+    document = Document(
+        knowledge_base_id=knowledge_base_id,
+        filename=filename,
+        stored_name=stored_name,
+        content_type=content_type or "",
+        size=size,
+        status="pending",
+    )
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+    background_tasks.add_task(
+        index_document, document.id, embedding_api_key, chroma_api_key
+    )
+    return {"id": document.id, "status": document.status, "filename": document.filename}
+
+
 @router.post("/{knowledge_base_id}/documents", status_code=202)
 async def upload_document(
     knowledge_base_id: int,
@@ -183,21 +213,125 @@ async def upload_document(
         raise
     finally:
         await file.close()
-    document = Document(
+    return _create_pending_document(
+        db=db,
         knowledge_base_id=knowledge_base_id,
         filename=filename,
         stored_name=stored_name,
         content_type=file.content_type or "",
         size=size,
-        status="pending",
+        background_tasks=background_tasks,
+        embedding_api_key=embedding_api_key,
+        chroma_api_key=chroma_api_key,
     )
-    db.add(document)
-    db.commit()
-    db.refresh(document)
-    background_tasks.add_task(
-        index_document, document.id, embedding_api_key, chroma_api_key
+
+
+@router.post("/{knowledge_base_id}/documents/text", status_code=202)
+async def create_text_document(
+    knowledge_base_id: int,
+    background_tasks: BackgroundTasks,
+    title: str = Form(default=""),
+    content: str = Form(...),
+    embedding_api_key: str = Form(default=""),
+    chroma_api_key: str = Form(default=""),
+    db: Session = Depends(get_db),
+):
+    """Create a knowledge document from pasted / typed plain text."""
+    _get_kb(db, knowledge_base_id)
+    text = (content or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="请填写文本内容")
+    payload = text.encode("utf-8")
+    if len(payload) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="文本超过大小限制")
+
+    raw_title = (title or "").strip() or "未命名文本"
+    safe_stem = "".join(
+        ch for ch in raw_title if ch not in '<>:"/\\|?*'
+    ).strip(" .") or "未命名文本"
+    if len(safe_stem) > 80:
+        safe_stem = safe_stem[:80].rstrip()
+    filename = f"{safe_stem}.txt"
+    stored_name = f"{uuid.uuid4().hex}.txt"
+    target = UPLOAD_DIR / stored_name
+    try:
+        target.write_bytes(payload)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return _create_pending_document(
+        db=db,
+        knowledge_base_id=knowledge_base_id,
+        filename=filename,
+        stored_name=stored_name,
+        content_type="text/plain; charset=utf-8",
+        size=len(payload),
+        background_tasks=background_tasks,
+        embedding_api_key=embedding_api_key,
+        chroma_api_key=chroma_api_key,
     )
-    return {"id": document.id, "status": document.status, "filename": document.filename}
+
+
+def _safe_txt_filename(title: str, fallback: str = "未命名文档") -> str:
+    raw_title = (title or "").strip() or fallback
+    safe_stem = "".join(ch for ch in raw_title if ch not in '<>:"/\\|?*').strip(" .") or fallback
+    if len(safe_stem) > 80:
+        safe_stem = safe_stem[:80].rstrip()
+    return f"{safe_stem}.txt"
+
+
+@router.post("/{knowledge_base_id}/documents/url", status_code=202)
+async def create_url_document(
+    knowledge_base_id: int,
+    background_tasks: BackgroundTasks,
+    url: str = Form(...),
+    title: str = Form(default=""),
+    embedding_api_key: str = Form(default=""),
+    chroma_api_key: str = Form(default=""),
+    db: Session = Depends(get_db),
+):
+    """Fetch a public web page, extract text, and index it like an uploaded document."""
+    _get_kb(db, knowledge_base_id)
+    try:
+        page = fetch_web_page(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"抓取网页失败：{exc}") from exc
+
+    body = (
+        f"来源：{page['url']}\n"
+        f"标题：{page['title'] or (title or '').strip() or '未命名网页'}\n\n"
+        f"{page['text']}"
+    )
+    payload = body.encode("utf-8")
+    if len(payload) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="网页正文超过大小限制")
+
+    filename = _safe_txt_filename(
+        (title or "").strip() or page["title"] or "网页内容",
+        fallback="网页内容",
+    )
+    stored_name = f"{uuid.uuid4().hex}.txt"
+    target = UPLOAD_DIR / stored_name
+    try:
+        target.write_bytes(payload)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    result = _create_pending_document(
+        db=db,
+        knowledge_base_id=knowledge_base_id,
+        filename=filename,
+        stored_name=stored_name,
+        content_type="text/plain; charset=utf-8",
+        size=len(payload),
+        background_tasks=background_tasks,
+        embedding_api_key=embedding_api_key,
+        chroma_api_key=chroma_api_key,
+    )
+    result["source_url"] = page["url"]
+    return result
 
 
 @router.post("/{knowledge_base_id}/documents/{document_id}/retry", status_code=202)

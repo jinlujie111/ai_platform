@@ -1773,17 +1773,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const hintEl = root.querySelector('[data-emb-mode-hint="' + prefix + '"]');
     if (keyLabel) {
       keyLabel.innerHTML = mode === 'local'
-        ? 'Embedding API Key <span class="form-label-optional">(本地可选，保存在本机浏览器)</span>'
+        ? 'Embedding API Key <span class="form-label-optional">(Xinference 开启鉴权时必填，保存在本机浏览器)</span>'
         : 'Embedding API Key <span class="form-label-optional">(云端必填，保存在本机浏览器)</span>';
     }
     if (keyInput) {
       keyInput.placeholder = mode === 'local'
-        ? '本地服务可留空'
+        ? '在 Xinference 控制台创建 API Key 后填写；未开启鉴权可留空'
         : '填写 OpenAI Embedding API Key';
     }
     if (hintEl) {
       hintEl.textContent = mode === 'local'
-        ? '本地部署可选 BGE-M3 / BGE-large-zh / GTE-Qwen，Base URL 默认指向本机 Xinference。'
+        ? '本地 Xinference 3+ 默认开启鉴权：请在 http://127.0.0.1:9997 登录后创建 API Key，填到此处再上传文档。'
         : '云模型调用可选 OpenAI Embedding 模型，需要填写 Base URL 和 API Key。';
     }
   }
@@ -1855,8 +1855,8 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>` : '';
 
     const credentialsSection = showCredentials ? `
-        <label class="form-label" for="${id('embApiKey')}" data-emb-key-label="${prefix}">Embedding API Key <span class="form-label-optional">(本地可选，保存在本机浏览器)</span></label>
-        <input class="form-input" type="password" id="${id('embApiKey')}" placeholder="本地可留空；云端填写与 Base URL 匹配的 Key" autocomplete="off">
+        <label class="form-label" for="${id('embApiKey')}" data-emb-key-label="${prefix}">Embedding API Key <span class="form-label-optional">(Xinference 开启鉴权时必填，保存在本机浏览器)</span></label>
+        <input class="form-input" type="password" id="${id('embApiKey')}" placeholder="Xinference API Key；未开启鉴权可留空" autocomplete="off">
         ${showEmbTest ? `<button class="btn-test" type="button" data-kb-action="test-embedding">测试连接</button><div id="${id('embTestResult')}" class="test-result" hidden></div>` : ''}` : '';
 
     const chromaCredentials = showCredentials ? `
@@ -2448,10 +2448,8 @@ document.addEventListener('DOMContentLoaded', () => {
       || kb?.embedding_base_url
       || LOCAL_EMBEDDING_BASE_URL;
     const model = document.getElementById('embModel')?.value?.trim() || kb?.embedding_model || '';
-    if (inferEmbeddingDeployMode(baseUrl, model) === 'local') {
-      // Local OpenAI-compatible servers (e.g. Xinference) usually ignore auth.
-      return 'local';
-    }
+    // Local Xinference may run without auth; never invent a fake Bearer token.
+    if (inferEmbeddingDeployMode(baseUrl, model) === 'local') return '';
 
     const active = getActiveModel();
     if (!kb || !active?.apiKey) return '';
@@ -2468,7 +2466,33 @@ document.addEventListener('DOMContentLoaded', () => {
   function getEmbeddingKeyHint(knowledgeBaseId = selectedKnowledgeBaseId) {
     const kb = getKnowledgeBaseById(knowledgeBaseId);
     const baseUrl = kb?.embedding_base_url || LOCAL_EMBEDDING_BASE_URL;
+    const isLocal = inferEmbeddingDeployMode(baseUrl, kb?.embedding_model || '') === 'local';
+    if (isLocal) {
+      return `本地 Embedding 服务已开启鉴权，请填写有效的 API Key（当前地址：${baseUrl}）。可在 Xinference 控制台创建 Key；若未开鉴权可留空。`;
+    }
     return `请填写与 Embedding 服务匹配的 API Key（当前地址：${baseUrl}）。聊天模型的 Key 仅在双方 Base URL 一致时才会自动复用。`;
+  }
+
+  function isLocalEmbeddingConfig(knowledgeBaseId = selectedKnowledgeBaseId) {
+    const kb = getKnowledgeBaseById(knowledgeBaseId);
+    const baseUrl = document.getElementById('embBaseUrl')?.value?.trim()
+      || kb?.embedding_base_url
+      || LOCAL_EMBEDDING_BASE_URL;
+    const model = document.getElementById('embModel')?.value?.trim() || kb?.embedding_model || '';
+    return inferEmbeddingDeployMode(baseUrl, model) === 'local';
+  }
+
+  async function probeLocalEmbeddingAuthRequired(baseUrl) {
+    const raw = (baseUrl || LOCAL_EMBEDDING_BASE_URL).trim().replace(/\/+$/, '');
+    const root = raw.replace(/\/v1$/i, '');
+    try {
+      const response = await fetch(`${root}/v1/cluster/auth`, { method: 'GET' });
+      if (!response.ok) return null;
+      const data = await response.json();
+      return Boolean(data?.auth);
+    } catch (_) {
+      return null;
+    }
   }
 
   function switchKbDetailTab(tabName) {
@@ -2482,13 +2506,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tabName === 'chunks') loadChunks();
   }
 
-  function ensureEmbeddingApiKey(knowledgeBaseId = selectedKnowledgeBaseId) {
+  async function ensureEmbeddingApiKey(knowledgeBaseId = selectedKnowledgeBaseId) {
     const key = resolveEmbeddingApiKey(knowledgeBaseId);
     if (key) return key;
+
+    const local = isLocalEmbeddingConfig(knowledgeBaseId);
+    if (local) {
+      const kb = getKnowledgeBaseById(knowledgeBaseId);
+      const baseUrl = document.getElementById('embBaseUrl')?.value?.trim()
+        || kb?.embedding_base_url
+        || LOCAL_EMBEDDING_BASE_URL;
+      const authRequired = await probeLocalEmbeddingAuthRequired(baseUrl);
+      if (authRequired === false) return '';
+    }
+
     alert(getEmbeddingKeyHint(knowledgeBaseId));
     switchKbDetailTab('settings');
     document.getElementById('embApiKey')?.focus();
-    return '';
+    return null;
   }
 
   function getKnowledgeBaseCredentials(knowledgeBaseId = selectedKnowledgeBaseId) {
@@ -2989,13 +3024,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function uploadDocuments(files) {
     if (!selectedKnowledgeBaseId || !files?.length) return;
-    const embeddingApiKey = ensureEmbeddingApiKey();
-    if (!embeddingApiKey) return;
+    const embeddingApiKey = await ensureEmbeddingApiKey();
+    if (embeddingApiKey === null) return;
     const credentials = getKnowledgeBaseCredentials();
     for (const file of files) {
       const form = new FormData();
       form.append('file', file);
-      form.append('embedding_api_key', embeddingApiKey);
+      form.append('embedding_api_key', embeddingApiKey || '');
       form.append('chroma_api_key', credentials.chromaApiKey);
       try {
         await knowledgeApi('/' + selectedKnowledgeBaseId + '/documents', { method: 'POST', body: form });
@@ -3007,11 +3042,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function retryDocument(documentId) {
-    const embeddingApiKey = ensureEmbeddingApiKey();
-    if (!embeddingApiKey) return;
+    const embeddingApiKey = await ensureEmbeddingApiKey();
+    if (embeddingApiKey === null) return;
     const credentials = getKnowledgeBaseCredentials();
     const form = new FormData();
-    form.append('embedding_api_key', embeddingApiKey);
+    form.append('embedding_api_key', embeddingApiKey || '');
     form.append('chroma_api_key', credentials.chromaApiKey);
     try {
       await knowledgeApi(`/${selectedKnowledgeBaseId}/documents/${documentId}/retry`, { method: 'POST', body: form });
@@ -3069,10 +3104,20 @@ document.addEventListener('DOMContentLoaded', () => {
   async function testEmbeddingConnection() {
     const payload = knowledgeBaseFormPayload();
     const isLocal = inferEmbeddingDeployMode(payload.embedding_base_url, payload.embedding_model) === 'local';
-    const embeddingApiKey = isLocal
-      ? (resolveEmbeddingApiKey() || '')
-      : ensureEmbeddingApiKey();
-    if (!isLocal && !embeddingApiKey) return;
+    let embeddingApiKey = resolveEmbeddingApiKey() || '';
+    if (!embeddingApiKey) {
+      if (isLocal) {
+        const authRequired = await probeLocalEmbeddingAuthRequired(payload.embedding_base_url);
+        if (authRequired !== false) {
+          alert(getEmbeddingKeyHint());
+          document.getElementById('embApiKey')?.focus();
+          return;
+        }
+      } else {
+        embeddingApiKey = await ensureEmbeddingApiKey();
+        if (embeddingApiKey === null) return;
+      }
+    }
     const result = document.getElementById('embTestResult');
     const form = new FormData();
     form.append('embedding_api_key', embeddingApiKey);

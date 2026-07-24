@@ -45,6 +45,16 @@
         </button>
         <h1 class="chat-title" id="currentReportTitle">新建会话</h1>
         <div class="chat-header-tools">
+          <div class="chat-kb-picker" id="chatAgentPicker">
+            <button type="button" class="chat-kb-picker-btn" id="chatAgentPickerBtn" title="选择 Agent 配置">自由配置</button>
+            <div class="chat-kb-picker-menu" id="chatAgentPickerMenu" hidden>
+              <label class="chat-kb-picker-item chat-kb-picker-none">
+                <input type="radio" name="chatAgentPick" id="chatAgentNone" value="" checked>
+                <span>自由配置（手动选模型 / 知识库）</span>
+              </label>
+              <div class="chat-kb-picker-list" id="chatAgentPickerList"></div>
+            </div>
+          </div>
           <div class="chat-kb-picker" id="chatKbPicker">
             <button type="button" class="chat-kb-picker-btn" id="chatKbPickerBtn" title="可多选知识库">不使用知识库</button>
             <div class="chat-kb-picker-menu" id="chatKbPickerMenu" hidden>
@@ -121,52 +131,14 @@
           </div>
           <div><strong>配置中心</strong><span>Platform settings</span></div>
         </div>
-        <div class="modal-nav">
-          <div class="modal-nav-label">AI 与数据</div>
-          <button class="modal-nav-item active" data-panel="model">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
-            模型配置
-          </button>
-          <button class="modal-nav-item" data-panel="datasource">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-            数据源接入
-          </button>
-          <button class="modal-nav-item" data-panel="kb">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-            知识库
-          </button>
-          <div class="modal-nav-label">平台能力</div>
-          <button class="modal-nav-item" data-panel="mcp">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-            MCP 管理
-          </button>
-          <button class="modal-nav-item" data-panel="skill">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-            Skill 管理
-          </button>
-          <button class="modal-nav-item" data-panel="tool">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-            Tool 设置
-          </button>
-          <button class="modal-nav-item" data-panel="api">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            API 设置
-          </button>
- 
-          <button class="modal-nav-item" data-panel="dataprocess">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            数据处理
-          </button>
-          <button class="modal-nav-item" data-panel="permission">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            权限与审计
-          </button>
-
-          <button class="modal-nav-item" data-panel="dataoutput">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            数据输出
-          </button>
-       </div>
+        <div class="modal-nav" id="vue-settings-nav"></div>
+        <div class="modal-sidebar-footer" id="settingsAccount">
+          <div class="settings-account-meta">
+            <strong id="settingsUserName">未登录</strong>
+            <small id="settingsUserRole">-</small>
+          </div>
+          <button type="button" class="btn-secondary settings-logout-btn" id="settingsLogoutBtn">退出登录</button>
+        </div>
       </div>
 
       <!-- 右侧内容 -->
@@ -176,10 +148,12 @@
             <span class="modal-content-title" id="modalTitle">模型配置</span>
             <span class="modal-content-subtitle">管理平台能力、连接与安全策略</span>
           </div>
-          <div class="modal-header-status"><span></span>系统运行正常</div>
-          <button class="modal-close" id="closeModal">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
+          <div class="modal-header-actions">
+            <div class="modal-header-status"><span></span>系统运行正常</div>
+            <button class="modal-close" id="closeModal" type="button" aria-label="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
         </div>
 
         <!-- ========== 模型配置面板 ========== -->
@@ -358,6 +332,16 @@
               <div class="skill-market-grid">
                 <div class="skill-market-card">
                   <div class="skill-market-header">
+                    <span class="skill-market-icon">&#x2705;</span>
+                    <span class="skill-market-name">数据验证校验</span>
+                  </div>
+                  <div class="skill-market-desc">强制先用 SQL 工具核验库内真实数据，禁止把知识库文档或推断写成「查询结果」</div>
+                  <div class="skill-market-tags"><span class="tag">校验</span><span class="tag">SQL</span><span class="tag">防幻觉</span></div>
+                  <div class="skill-market-meta">v1.0 · 作者：官方</div>
+                  <button class="btn-install-skill" data-skill="data-verify">安装</button>
+                </div>
+                <div class="skill-market-card">
+                  <div class="skill-market-header">
                     <span class="skill-market-icon">&#x1F4CA;</span>
                     <span class="skill-market-name">SQL 查询分析器</span>
                   </div>
@@ -457,6 +441,39 @@
               </div>
             </div>
           </div>
+
+        <!-- ========== Agent 管理面板 ========== -->
+        <div class="modal-panel" id="panel-agent">
+          <div class="panel-desc">组合 Skill、知识库、数据源与工具策略。启用后可在对话页顶部选用；此处负责维护配置，不在此切换当前对话。</div>
+
+          <div class="agent-panel-hero">
+            <div>
+              <div class="agent-panel-hero-title">我的 Agent</div>
+              <div class="agent-panel-hero-sub" id="agentListSummary">保存后请到对话页顶部选择要使用的 Agent</div>
+            </div>
+            <button class="btn-primary agent-create-btn" id="addAgentBtn" type="button">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              新建 Agent
+            </button>
+          </div>
+
+          <div class="agent-toolbar">
+            <input class="ds-search-input" type="text" id="agentSearchInput" placeholder="搜索名称或说明...">
+          </div>
+
+          <div class="agent-card-list" id="agentList">
+            <div class="agent-empty">
+              <div class="agent-empty-icon" aria-hidden="true">◇</div>
+              <strong>还没有 Agent</strong>
+              <span>先配置模型，再创建第一个组合配置</span>
+            </div>
+          </div>
+
+          <div class="agent-hint-card">
+            <strong>配置关系</strong>
+            <span>Agent 只引用已有资源，不重复保存 API Key。模型 / Skill / MCP / 知识库仍在各自面板维护。</span>
+          </div>
+        </div>
 
         <!-- ========== Tool 设置面板 ========== -->
         <div class="modal-panel" id="panel-tool">
@@ -635,19 +652,19 @@
         <div class="modal-panel" id="panel-permission">
           <div class="panel-desc">管理角色权限、流水线审批与操作审计。会话创建的流水线需审批通过后才会生效执行。</div>
 
-          <section class="perm-identity-card" aria-label="当前身份">
+          <section class="perm-identity-card" aria-label="当前账号">
             <div class="perm-identity-main">
               <div class="perm-identity-icon" aria-hidden="true">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
               </div>
               <div class="perm-identity-copy">
-                <strong>当前身份</strong>
-                <small>管理员可批准或驳回待生效流水线；普通用户仅可查看。</small>
+                <strong id="permUserName">未登录</strong>
+                <small id="permUserMeta">登录后显示角色与权限范围</small>
               </div>
             </div>
-            <div class="perm-role-toggle" id="platformRoleToggle" role="group" aria-label="切换身份">
-              <button type="button" class="perm-role-opt" data-role="user">普通用户</button>
-              <button type="button" class="perm-role-opt" data-role="admin">管理员</button>
+            <div class="perm-identity-actions">
+              <span class="perm-role-badge" id="permRoleBadge">-</span>
+              <button type="button" class="btn-secondary" id="logoutBtn">退出登录</button>
             </div>
           </section>
 
@@ -656,6 +673,10 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
               <span>任务审批</span>
               <em class="perm-tab-count" id="approvalPendingCount">0</em>
+            </button>
+            <button class="perm-tab" data-perm-tab="users" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span>用户管理</span>
             </button>
             <button class="perm-tab" data-perm-tab="tenant" type="button">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -689,8 +710,26 @@
                   <button class="btn-secondary" id="refreshApprovalBtn" type="button">刷新</button>
                 </div>
               </div>
-              <div class="approval-admin-hint" id="approvalAdminHint">当前为普通用户视图，仅可查看；切换为管理员后可批准 / 驳回。</div>
+              <div class="approval-admin-hint" id="approvalAdminHint">当前为普通用户，仅可查看审批列表；批准 / 驳回需管理员账号。</div>
               <div class="approval-list" id="approvalList"></div>
+            </div>
+          </div>
+
+          <!-- ========== 用户管理 ========== -->
+          <div class="kb-tab-content" id="perm-tab-users">
+            <div class="perm-panel-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>用户管理</h3>
+                  <p>创建管理员或普通用户；普通用户不可审批流水线。</p>
+                </div>
+                <div class="perm-toolbar">
+                  <button class="btn-primary" id="addUserBtn" type="button">新建用户</button>
+                </div>
+              </div>
+              <div id="userManageList" class="skill-list">
+                <div class="doc-empty-hint">加载中...</div>
+              </div>
             </div>
           </div>
 
@@ -1013,12 +1052,19 @@
         </div>
         <div class="form-group">
           <label class="form-label">API Key</label>
-          <div class="api-key-input-wrap">
-            <input class="form-input" type="password" id="modelApiKey" placeholder="sk-..." style="flex:1">
-            <button class="btn-show-key" id="toggleApiKey" type="button" title="显示/隐藏">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            </button>
-          </div>
+          <input
+            class="form-input secret-input"
+            type="password"
+            id="modelApiKey"
+            placeholder="输入后仅以掩码保存展示，不可查看明文"
+            autocomplete="new-password"
+            spellcheck="false"
+            autocapitalize="off"
+            autocorrect="off"
+            data-lpignore="true"
+            data-1p-ignore="true"
+          >
+          <div class="form-help">出于安全考虑，API Key 不可显示、不可复制；如需更换请重新输入后保存。</div>
         </div>
         <div class="add-model-test" id="addModelTestResult" hidden></div>
       </div>
@@ -1125,6 +1171,139 @@
       <div class="app-dialog__footer add-model-footer">
         <button class="btn-secondary" id="cancelAddSkill" type="button">取消</button>
         <button class="btn-primary" id="saveSkillBtn" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 添加 / 修改 Agent 弹窗 ========== -->
+  <div class="modal-overlay" id="addAgentModal">
+    <div class="app-dialog app-dialog--lg modal-add-model modal-add-agent">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="agentModalTitle">新建 Agent</span>
+          <span class="app-dialog__subtitle">分步绑定模型与能力，保存后可在对话页选用</span>
+        </div>
+        <button class="modal-close" id="closeAddAgent" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body agent-modal-body">
+        <section class="agent-form-section">
+          <div class="agent-form-section-head">
+            <span class="agent-step">1</span>
+            <div>
+              <strong>基本信息</strong>
+              <small>名称用于对话页展示</small>
+            </div>
+          </div>
+          <div class="agent-form-grid">
+            <div class="form-group agent-field-span2">
+              <label class="form-label" for="agentName">名称</label>
+              <input class="form-input" id="agentName" placeholder="如：合同审查助手">
+            </div>
+            <div class="form-group agent-field-span2">
+              <label class="form-label" for="agentDescription">说明 <span class="form-label-optional">(可选)</span></label>
+              <textarea class="form-textarea" id="agentDescription" rows="2" placeholder="一句话说明适用场景"></textarea>
+            </div>
+            <div class="form-group agent-field-span2">
+              <label class="form-label">基座模型</label>
+              <div class="agent-model-inherit" id="agentModelInheritHint">使用「模型配置」中的当前模型</div>
+              <div class="form-help">不单独配置；对话时自动沿用模型配置里设为当前的有效模型</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="agent-form-section">
+          <div class="agent-form-section-head">
+            <span class="agent-step">2</span>
+            <div>
+              <strong>能力绑定</strong>
+              <small>勾选该 Agent 可使用的资源</small>
+            </div>
+          </div>
+          <div class="agent-bind-grid">
+            <div class="agent-bind-panel">
+              <div class="agent-bind-panel-head">
+                <strong>Skill</strong>
+                <span id="agentSkillCount">0</span>
+              </div>
+              <div class="agent-bind-list" id="agentSkillBindList"></div>
+            </div>
+            <div class="agent-bind-panel">
+              <div class="agent-bind-panel-head">
+                <strong>知识库</strong>
+                <span id="agentKbCount">0</span>
+              </div>
+              <div class="agent-bind-list" id="agentKbBindList"></div>
+            </div>
+            <div class="agent-bind-panel">
+              <div class="agent-bind-panel-head">
+                <strong>数据源</strong>
+                <span id="agentDsCount">0</span>
+              </div>
+              <div class="agent-bind-list" id="agentDsBindList"></div>
+            </div>
+            <div class="agent-bind-panel">
+              <div class="agent-bind-panel-head">
+                <strong>MCP</strong>
+                <span id="agentMcpCount">0</span>
+              </div>
+              <div class="agent-bind-list" id="agentMcpBindList"></div>
+              <div class="form-help agent-bind-help">未勾选时，若允许 MCP 则使用全部已启用项</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="agent-form-section">
+          <div class="agent-form-section-head">
+            <span class="agent-step">3</span>
+            <div>
+              <strong>工具与状态</strong>
+              <small>控制对话中的工具循环</small>
+            </div>
+          </div>
+          <div class="agent-policy-card">
+            <label class="tool-switch-row">
+              <span>
+                <strong>启用 Tool 循环</strong>
+                <small>关闭后仅普通对话，不调用工具</small>
+              </span>
+              <input type="checkbox" id="agentToolEnabled" checked>
+            </label>
+            <label class="tool-switch-row">
+              <span>
+                <strong>允许 MCP</strong>
+                <small>可调用已绑定或全部启用的 MCP</small>
+              </span>
+              <input type="checkbox" id="agentAllowMcp" checked>
+            </label>
+            <label class="tool-switch-row">
+              <span>
+                <strong>允许流水线工具</strong>
+                <small>可创建 / 同步 / 调度流水线相关工具</small>
+              </span>
+              <input type="checkbox" id="agentAllowPipeline" checked>
+            </label>
+            <div class="agent-rounds-row">
+              <label class="form-label" for="agentMaxRounds">最大工具轮数</label>
+              <input class="form-input" type="number" id="agentMaxRounds" min="1" max="10" value="6">
+            </div>
+          </div>
+          <div class="status-option-group agent-status-group">
+            <label class="status-option active">
+              <input type="radio" name="agentEnabled" value="true" checked>
+              <span><strong>生效</strong><small>可在对话中选用</small></span>
+            </label>
+            <label class="status-option">
+              <input type="radio" name="agentEnabled" value="false">
+              <span><strong>停用</strong><small>保留配置，不出现在选用列表</small></span>
+            </label>
+          </div>
+        </section>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelAddAgent" type="button">取消</button>
+        <button class="btn-primary" id="saveAgentBtn" type="button">保存 Agent</button>
       </div>
     </div>
   </div>
@@ -1304,7 +1483,7 @@
             <label class="tool-switch-row" style="padding:8px 0;margin-top:4px">
               <span>
                 <strong style="font-size:12px">启用定时任务</strong>
-                <small>保存调度配置，到点可配合外部调度或手动执行</small>
+                <small>勾选后由服务进程内调度器按 cron 自动执行（流水线须为已生效/active）</small>
               </span>
               <input type="checkbox" id="pipelineScheduleEnabled">
             </label>
@@ -1321,6 +1500,161 @@
       <div class="app-dialog__footer add-model-footer">
         <button class="btn-secondary" id="cancelPipelineModal" type="button">取消</button>
         <button class="btn-primary" id="savePipelineBtn" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="addKbTextModal">
+    <div class="app-dialog app-dialog--md modal-add-model modal-kb-text">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title">录入文本</span>
+          <span class="app-dialog__subtitle">粘贴或直接输入内容，保存后按 TXT 文档索引</span>
+        </div>
+        <button class="modal-close" id="closeAddKbText" type="button" aria-label="关闭">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <div class="form-group">
+          <label class="form-label" for="kbTextTitle">标题 <span class="form-label-optional">(可选)</span></label>
+          <input class="form-input" id="kbTextTitle" placeholder="如：产品退换货政策摘要" maxlength="80">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="kbTextContent">文本内容</label>
+          <textarea class="form-textarea kb-text-editor" id="kbTextContent" rows="12" spellcheck="false" placeholder="在此粘贴或输入要入库的文本…"></textarea>
+          <div class="kb-text-meta">
+            <span class="form-help">将保存为 UTF-8 文本并走与上传文档相同的切分 / 向量化流程</span>
+            <span id="kbTextCount">0 字</span>
+          </div>
+        </div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelAddKbText" type="button">取消</button>
+        <button class="btn-primary" id="saveKbTextBtn" type="button">保存并索引</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="addKbUrlModal">
+    <div class="app-dialog app-dialog--md modal-add-model modal-kb-url">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title">录入网页</span>
+          <span class="app-dialog__subtitle">填写公开可访问的 URL，自动抓取正文并索引</span>
+        </div>
+        <button class="modal-close" id="closeAddKbUrl" type="button" aria-label="关闭">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <div class="form-group">
+          <label class="form-label" for="kbUrlInput">网页地址</label>
+          <input class="form-input" id="kbUrlInput" type="url" placeholder="https://example.com/article" autocomplete="off">
+          <div class="form-help">仅支持公网 http/https；不支持登录墙、内网或本地地址</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="kbUrlTitle">自定义标题 <span class="form-label-optional">(可选)</span></label>
+          <input class="form-input" id="kbUrlTitle" placeholder="留空则使用网页标题" maxlength="80">
+        </div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelAddKbUrl" type="button">取消</button>
+        <button class="btn-primary" id="saveKbUrlBtn" type="button">抓取并索引</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay login-overlay open" id="loginOverlay" aria-hidden="false">
+    <div class="app-dialog app-dialog--md modal-add-model login-dialog" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="loginTitle">登录 AI 平台</span>
+          <span class="app-dialog__subtitle" id="loginSubtitle">使用账号密码进入系统；新用户可注册普通账号</span>
+        </div>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <div class="auth-mode-tabs" role="tablist" aria-label="登录或注册">
+          <button type="button" class="auth-mode-tab active" data-auth-mode="login" id="authModeLoginBtn">登录</button>
+          <button type="button" class="auth-mode-tab" data-auth-mode="register" id="authModeRegisterBtn">注册</button>
+        </div>
+
+        <div id="authLoginPane">
+          <div class="form-group">
+            <label class="form-label" for="loginUsername">用户名</label>
+            <input class="form-input" id="loginUsername" autocomplete="username" placeholder="请输入用户名">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="loginPassword">密码</label>
+            <input class="form-input" id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入密码">
+          </div>
+        </div>
+
+        <div id="authRegisterPane" hidden>
+          <div class="form-group">
+            <label class="form-label" for="registerUsername">用户名</label>
+            <input class="form-input" id="registerUsername" autocomplete="username" placeholder="3–64 位字母数字或 _-." maxlength="64">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="registerDisplayName">显示名 <span class="form-label-optional">(可选)</span></label>
+            <input class="form-input" id="registerDisplayName" autocomplete="nickname" placeholder="用于界面展示" maxlength="120">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="registerPassword">密码</label>
+            <input class="form-input" id="registerPassword" type="password" autocomplete="new-password" placeholder="至少 6 位" maxlength="128">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="registerPasswordConfirm">确认密码</label>
+            <input class="form-input" id="registerPasswordConfirm" type="password" autocomplete="new-password" placeholder="再次输入密码" maxlength="128">
+          </div>
+          <div class="form-help" id="registerHint">注册成功后自动登录，角色为普通用户</div>
+        </div>
+
+        <div class="inline-status error" id="loginError" hidden></div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-primary" id="loginSubmitBtn" type="button">登录</button>
+      </div>
+    </div>
+  </div>
+
+
+  <div class="modal-overlay" id="addUserModal">
+    <div class="app-dialog app-dialog--md modal-add-model">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="userModalTitle">新建用户</span>
+          <span class="app-dialog__subtitle">设置账号、角色与初始密码</span>
+        </div>
+        <button class="modal-close" id="closeAddUser" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <input type="hidden" id="editingUserId" value="">
+        <div class="form-group">
+          <label class="form-label" for="userUsername">用户名</label>
+          <input class="form-input" id="userUsername" placeholder="字母数字或 _-." maxlength="64">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="userDisplayName">显示名</label>
+          <input class="form-input" id="userDisplayName" placeholder="可选" maxlength="120">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="userRole">角色</label>
+          <select class="form-select" id="userRole">
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="userPassword">密码</label>
+          <input class="form-input" id="userPassword" type="password" placeholder="新建必填；编辑留空表示不修改" maxlength="128">
+        </div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelAddUser" type="button">取消</button>
+        <button class="btn-primary" id="saveUserBtn" type="button">保存</button>
       </div>
     </div>
   </div>
@@ -1353,6 +1687,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script type="module" src="/src/main.js"></script>
 </body>
 </html>

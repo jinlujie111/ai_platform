@@ -26,6 +26,75 @@ uvicorn backend.app.main:app --reload --port 8000
 
 访问 http://localhost:8000，API 文档位于 http://localhost:8000/docs。
 
+### 前端构建（Vite + Vue）
+
+配置中心导航已迁到 Vue；首次或更新前端后需构建：
+
+```powershell
+cd web
+npm install
+npm run build
+```
+
+开发联调可用 `npm run dev`（http://localhost:5173，`/api` 代理到 8000）。详情见 [web/README.md](web/README.md)。
+
+## 飞书群聊机器人
+
+1. 在[飞书开放平台](https://open.feishu.cn/)创建**企业自建应用**，开通「机器人」能力。  
+2. 权限至少包含：`im:message`、`im:message.group_at_msg`（接收群 @ 消息）、发送消息相关权限。  
+3. **事件订阅**选择「将事件发送至开发者服务器」，请求地址：
+
+```text
+https://你的公网域名/api/feishu/webhook
+```
+
+本地调试可用 ngrok / frp 等把 `8000` 端口暴露出去。  
+订阅事件：`im.message.receive_v1`。群内建议勾选「仅 @ 机器人时推送」。
+
+4. 复制 `.env.example` 为 `.env`，填写：
+
+```env
+FEISHU_APP_ID=cli_xxx
+FEISHU_APP_SECRET=xxx
+FEISHU_VERIFICATION_TOKEN=xxx
+FEISHU_ENCRYPT_KEY=   # 若开启加密再填
+FEISHU_LLM_PROVIDER=openai
+FEISHU_LLM_MODEL=gpt-4o-mini
+FEISHU_LLM_API_KEY=sk-xxx
+FEISHU_LLM_BASE_URL=https://api.openai.com/v1
+```
+
+> 说明：飞书机器人走**服务端模型配置**（`FEISHU_LLM_*`），与浏览器里「模型配置」相互独立。
+
+5. 安装依赖并启动（在项目根目录）：
+
+```powershell
+pip install -r requirements.txt
+uvicorn backend.app.main:app --reload --port 8000
+```
+
+6. 健康检查：`GET http://127.0.0.1:8000/api/feishu/status`  
+7. 把机器人拉进群，`@机器人` + 问题，即可收到回复。
+
+## 流水线定时任务
+
+平台启动后会自动拉起**进程内调度器**（可用环境变量 `ENABLE_SCHEDULER=false` 关闭）。
+
+要让定时生效：
+
+1. 流水线状态为 **active**（聊天创建的需先在「权限与审计」审批通过）  
+2. 填写合法 **cron**（5 段，如 `0 2 * * *` 每天 2:00）  
+3. 勾选 **启用定时任务** 并保存  
+4. 保持 `uvicorn` 进程运行（调度器在服务进程内，停服务即停止调度）
+
+查看调度状态：
+
+```text
+GET http://127.0.0.1:8000/api/pipelines/scheduler/status
+```
+
+说明：`执行日期 exec_date` 用于替换 SQL 中的 `{exec_date}` 占位符，不是“哪天开始启用定时”。
+
 ChromaDB 默认嵌入式运行，无需单独启动向量库进程。如需远程 Chroma Server，在知识库“索引配置”中填写 HTTP 地址（如 `http://localhost:8001`）。Embedding API Key 和 Chroma API Key 随请求提交，不会写入 SQLite。
 
 本地部署 Embedding 模型时，可直接运行：

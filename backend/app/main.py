@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional, List
+from contextlib import asynccontextmanager
 import os
 import shutil
 import httpx
@@ -17,6 +18,7 @@ try:
     from .models import DataSource, KnowledgeBase
     from .services.knowledge import build_rag_context, retrieve
     from .services.chat_agent import KnowledgeToolRef, McpToolRef, run_tool_chat
+    from .services.scheduler import start_scheduler, stop_scheduler
 except ImportError:
     from llm import call_llm, test_llm_connection
     from database import get_db, init_db
@@ -26,18 +28,43 @@ except ImportError:
     from models import DataSource, KnowledgeBase
     from services.knowledge import build_rag_context, retrieve
     from services.chat_agent import KnowledgeToolRef, McpToolRef, run_tool_chat
+    from services.scheduler import start_scheduler, stop_scheduler
 
-app = FastAPI(title='AI Platform Demo')
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler()
+    yield
+    await stop_scheduler()
+
+
+app = FastAPI(title='AI Platform Demo', lifespan=lifespan)
 init_db()
 app.include_router(knowledge_router)
 app.include_router(datasource_router)
 app.include_router(pipeline_router)
+try:
+    from .auth_api import router as auth_router
+except ImportError:
+    from auth_api import router as auth_router
+app.include_router(auth_router)
+try:
+    from .workspace_api import router as workspace_router
+except ImportError:
+    from workspace_api import router as workspace_router
+app.include_router(workspace_router)
+try:
+    from .feishu_api import router as feishu_router
+except ImportError:
+    from feishu_api import router as feishu_router
+app.include_router(feishu_router)
 
-# mount static files
-static_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'web')
-if not os.path.isdir(static_dir):
-    static_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'web')
-app.mount('/static', StaticFiles(directory=os.path.join(os.path.dirname(__file__), '..', '..', 'web')), name='static')
+# Frontend static files (source + Vite dist under the same /static mount)
+_web_root = os.path.join(os.path.dirname(__file__), '..', '..', 'web')
+if not os.path.isdir(_web_root):
+    _web_root = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'web')
+_web_dist = os.path.join(_web_root, 'dist')
+app.mount('/static', StaticFiles(directory=_web_root), name='static')
 
 
 def build_skill_context(skills: List[Any]) -> str:
@@ -72,9 +99,13 @@ def build_skill_context(skills: List[Any]) -> str:
 
 @app.get('/')
 async def index():
-    fp = os.path.join(os.path.dirname(__file__), '..', '..', 'web', 'index.html')
-    if os.path.exists(fp):
-        return FileResponse(fp, media_type='text/html')
+    candidates = [
+        os.path.join(_web_dist, 'index.html'),
+        os.path.join(_web_root, 'index.html'),
+    ]
+    for fp in candidates:
+        if os.path.exists(fp):
+            return FileResponse(fp, media_type='text/html')
     return JSONResponse({'error': 'index not found'}, status_code=404)
 
 

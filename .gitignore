@@ -11,3 +11,5 @@ data/uploads/*
 !data/chroma/
 data/chroma/*
 !data/chroma/.gitkeep
+web/node_modules/
+web/dist/

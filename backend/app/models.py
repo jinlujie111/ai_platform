@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -186,3 +187,46 @@ class PipelineStepRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     run: Mapped[PipelineRun] = relationship(back_populates="step_runs")
+
+
+class User(Base):
+    """Platform login account: admin or normal user."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(200))
+    display_name: Mapped[str] = mapped_column(String(120), default="")
+    role: Mapped[str] = mapped_column(String(32), default="user", index=True)  # admin | user
+    is_active: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    workspace_settings: Mapped[list["UserWorkspaceSetting"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class UserWorkspaceSetting(Base):
+    """Per-user settings previously kept in browser localStorage."""
+
+    __tablename__ = "user_workspace_settings"
+    __table_args__ = (
+        UniqueConstraint("user_id", "setting_key", name="uq_user_workspace_setting"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    setting_key: Mapped[str] = mapped_column(String(64), index=True)
+    setting_value: Mapped[str] = mapped_column(
+        Text().with_variant(LONGTEXT(), "mysql"),
+        default="null",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    user: Mapped[User] = relationship(back_populates="workspace_settings")

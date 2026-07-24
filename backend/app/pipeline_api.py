@@ -7,7 +7,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .database import SessionLocal, get_db
-from .models import Pipeline, PipelineRun, PipelineStep
+from .deps_auth import require_admin
+from .models import Pipeline, PipelineRun, PipelineStep, User
 from .pipeline_schemas import (
     PipelineCreate,
     PipelineOut,
@@ -19,7 +20,18 @@ from .pipeline_schemas import (
 )
 from .services.pipeline_runner import run_pipeline
 
+try:
+    from .services.scheduler import get_scheduler_status
+except ImportError:
+    from services.scheduler import get_scheduler_status
+
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
+
+
+@router.get("/scheduler/status")
+def scheduler_status():
+    """Inspect in-process cron scheduler."""
+    return get_scheduler_status()
 
 
 def _dump(model, **kwargs):
@@ -348,7 +360,11 @@ def trigger_pipeline(
 
 
 @router.post("/{pipeline_id}/approve", response_model=PipelineOut)
-def approve_pipeline(pipeline_id: int, db: Session = Depends(get_db)):
+def approve_pipeline(
+    pipeline_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
     pipeline = _get_pipeline(db, pipeline_id)
     status = (pipeline.status or "").strip().lower()
     if status not in ("pending_approval", "pending", "rejected", "draft"):
@@ -371,6 +387,7 @@ def reject_pipeline(
     pipeline_id: int,
     reason: str = Query(default=""),
     db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
 ):
     pipeline = _get_pipeline(db, pipeline_id)
     status = (pipeline.status or "").strip().lower()
