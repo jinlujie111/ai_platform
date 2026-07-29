@@ -5,11 +5,15 @@ import logging
 import os
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
 
 try:
-    from .llm import call_llm
+    from .database import SessionLocal
+    from .deps_auth import require_usable_user
+    from .gateway.errors import GatewayError
+    from .gateway.service import chat_text as gateway_chat_text
+    from .models import User
     from .services.feishu_bot import (
         default_llm_config,
         extract_text_from_message,
@@ -21,7 +25,11 @@ try:
         should_handle_group_message,
     )
 except ImportError:
-    from llm import call_llm
+    from database import SessionLocal
+    from deps_auth import require_usable_user
+    from gateway.errors import GatewayError
+    from gateway.service import chat_text as gateway_chat_text
+    from models import User
     from services.feishu_bot import (
         default_llm_config,
         extract_text_from_message,
@@ -53,25 +61,51 @@ _load_dotenv()
 
 async def _answer_and_reply(message_id: str, user_text: str) -> None:
     cfg = default_llm_config()
-    if not cfg["api_key"] or not cfg["model"]:
+    gateway_model = (os.getenv("FEISHU_GATEWAY_MODEL") or "default").strip() or "default"
+    if not cfg["api_key"] and not gateway_model:
         await reply_text(
             message_id,
-            "飞书机器人尚未配置模型：请在服务器 .env 中设置 FEISHU_LLM_MODEL / FEISHU_LLM_API_KEY / FEISHU_LLM_BASE_URL。",
+            "飞书机器人尚未配置模型：请在服务器 .env 中设置 FEISHU_LLM_* 或在 Gateway 配置 default 路由。",
         )
         return
+    db = SessionLocal()
     try:
-        answer = await call_llm(
-            provider=cfg["provider"],
-            model=cfg["model"],
-            api_key=cfg["api_key"],
-            base_url=cfg["base_url"],
-            message=user_text,
-            history=None,
-            system_context="",
-        )
+        if cfg["api_key"] and cfg["model"]:
+            answer = await gateway_chat_text(
+                db,
+                provider=cfg["provider"],
+                model=cfg["model"],
+                api_key=cfg["api_key"],
+                base_url=cfg["base_url"],
+                message=user_text,
+                history=None,
+                system_context="",
+                source="feishu",
+                is_admin=True,
+            )
+        else:
+            # Resolve via Gateway logical model / route (server-hosted keys)
+            try:
+                from .gateway.service import chat_completion
+            except ImportError:
+                from gateway.service import chat_completion
+
+            result = await chat_completion(
+                db,
+                model=gateway_model,
+                messages=[{"role": "user", "content": user_text}],
+                source="feishu",
+                is_admin=True,
+            )
+            answer = result.text
+    except GatewayError as exc:
+        logger.exception("feishu gateway failed")
+        answer = f"调用模型失败：{exc.message}"
     except Exception as exc:
         logger.exception("feishu llm failed")
         answer = f"调用模型失败：{exc}"
+    finally:
+        db.close()
     try:
         await reply_text(message_id, answer)
     except Exception:
@@ -79,12 +113,13 @@ async def _answer_and_reply(message_id: str, user_text: str) -> None:
 
 
 @router.get("/status")
-async def feishu_status():
+async def feishu_status(user: User = Depends(require_usable_user)):
     cfg = default_llm_config()
     return {
         "enabled": feishu_enabled(),
         "verification_token_set": bool(get_verification_token()),
         "llm_model_set": bool(cfg["model"] and cfg["api_key"]),
+        "gateway_model": (os.getenv("FEISHU_GATEWAY_MODEL") or "default").strip(),
         "webhook": "/api/feishu/webhook",
     }
 
@@ -143,7 +178,6 @@ async def feishu_webhook(request: Request, background: BackgroundTasks):
         if not text or not message_id:
             return {"ok": True, "skipped": "empty"}
 
-        # Acknowledge quickly; reply asynchronously
         background.add_task(_answer_and_reply, message_id, text)
         return {"ok": True}
 

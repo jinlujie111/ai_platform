@@ -17,7 +17,7 @@
 
     <div class="modal-nav-label">平台能力</div>
     <button
-      v-for="item in groups.platform"
+      v-for="item in visiblePlatform"
       :key="item.id"
       type="button"
       class="modal-nav-item"
@@ -32,7 +32,7 @@
 
     <div class="modal-nav-label">治理与输出</div>
     <button
-      v-for="item in groups.gov"
+      v-for="item in visibleGov"
       :key="item.id"
       type="button"
       class="modal-nav-item"
@@ -48,11 +48,12 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { activatePanel } from '@/legacy/panels.js';
 
 const active = ref('model');
 const loading = ref('');
+const isAdmin = ref(false);
 
 const icon = {
   model: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>',
@@ -65,6 +66,7 @@ const icon = {
   api: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
   dataprocess: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
   permission: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+  authz: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M19 8l2 2 4-4"/></svg>',
   dataoutput: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
 };
 
@@ -75,24 +77,56 @@ const groups = {
     { id: 'kb', label: '知识库', icon: icon.kb },
   ],
   platform: [
-    { id: 'agent', label: 'Agent 管理', icon: icon.agent },
-    { id: 'mcp', label: 'MCP 管理', icon: icon.mcp },
-    { id: 'skill', label: 'Skill 管理', icon: icon.skill },
-    { id: 'tool', label: 'Tool 设置', icon: icon.tool },
+    { id: 'agent', label: 'Agent 管理', icon: icon.agent, capability: 'agent' },
+    { id: 'mcp', label: 'MCP 管理', icon: icon.mcp, capability: 'mcp' },
+    { id: 'skill', label: 'Skill 管理', icon: icon.skill, capability: 'skill' },
+    { id: 'tool', label: 'Tool 设置', icon: icon.tool, capability: 'tool' },
     { id: 'api', label: 'API 设置', icon: icon.api },
   ],
   gov: [
     { id: 'dataprocess', label: '数据处理', icon: icon.dataprocess },
+    { id: 'gateway', label: 'Gateway 管理', icon: icon.model, adminOnly: true },
+    { id: 'gateway-usage', label: '用量统计', icon: icon.api },
     { id: 'permission', label: '权限与审计', icon: icon.permission },
+    { id: 'authz', label: '授权管理', icon: icon.authz, adminOnly: true },
     { id: 'dataoutput', label: '数据输出', icon: icon.dataoutput },
   ],
 };
 
+const caps = ref({ agent: false, mcp: false, skill: false, tool: false });
+
+const visiblePlatform = computed(() =>
+  groups.platform.filter((item) => !item.capability || caps.value[item.capability])
+);
+
+const visibleGov = computed(() =>
+  groups.gov.filter((item) => !item.adminOnly || isAdmin.value)
+);
+
+function refreshAccess() {
+  try {
+    isAdmin.value = Boolean(window.__AI_PLATFORM__?.isPlatformAdmin?.());
+    const next = window.__AI_PLATFORM__?.getUserCapabilities?.();
+    caps.value = {
+      agent: Boolean(isAdmin.value || next?.agent),
+      mcp: Boolean(isAdmin.value || next?.mcp),
+      skill: Boolean(isAdmin.value || next?.skill),
+      tool: Boolean(isAdmin.value || next?.tool),
+    };
+  } catch (_) {
+    isAdmin.value = false;
+    caps.value = { agent: false, mcp: false, skill: false, tool: false };
+  }
+}
+
 async function select(panelId) {
+  refreshAccess();
+  if (panelId === 'authz' && !isAdmin.value) return;
+  if (panelId === 'gateway' && !isAdmin.value) return;
+  if (['agent', 'mcp', 'skill', 'tool'].includes(panelId) && !caps.value[panelId]) return;
   active.value = panelId;
   loading.value = panelId;
   try {
-    // Prefer legacy router (updates titles / panel visibility), then lazy-activate.
     if (typeof window.switchToPanel === 'function') {
       window.switchToPanel(panelId);
     }
@@ -103,6 +137,8 @@ async function select(panelId) {
 }
 
 onMounted(() => {
+  refreshAccess();
+  window.addEventListener('ai-platform-auth-changed', refreshAccess);
   const current = document.querySelector('.modal-panel.active')?.id?.replace(/^panel-/, '');
   if (current) active.value = current;
 });

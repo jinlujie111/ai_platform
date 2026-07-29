@@ -62,6 +62,18 @@ export function initApp() {
       currentAuthUser = null;
       setAuthToken('');
       showLoginOverlay('登录已过期，请重新登录');
+    } else if (
+      response.status === 403
+      && !String(url).includes('/api/auth/change-password')
+      && !String(url).includes('/api/auth/me')
+    ) {
+      const data = await response.clone().json().catch(() => ({}));
+      const detail = typeof data.detail === 'string' ? data.detail : '';
+      // Only force the change-password UI when server explicitly says so.
+      if (detail.includes('修改密码')) {
+        if (currentAuthUser) currentAuthUser.must_change_password = true;
+        showChangePasswordOverlay(detail || '请先修改密码后再使用平台功能');
+      }
     }
     return response;
   }
@@ -191,6 +203,7 @@ export function initApp() {
 
   let models = loadModels();
   let activeModelId = localStorage.getItem('active_model_id') || (models.find((m) => m.active)?.id) || null;
+  let platformModels = []; // admin-configured gateway models/routes (no user key)
   let selectedProviderId = null;
   window.models = models;
 
@@ -401,7 +414,11 @@ export function initApp() {
     api: 'API 设置',
     dataprocess: '数据处理',
     permission: '权限与审计',
+    users: '权限与审计',
+    authz: '授权管理',
     dataoutput: '数据输出',
+      'gateway-usage': '用量统计',
+    gateway: 'Gateway 管理',
   };
 
   const TOOL_SETTINGS_KEY = 'ai_platform_tool_settings';
@@ -640,15 +657,32 @@ export function initApp() {
     return picked.map((item) => ({ name: item.name, config: item.mcpJson }));
   }
 
+  function getPermittedChatKnowledgeBaseIds() {
+    return knowledgeBases
+      .filter((kb) => isKbEnabled('self', kb.id))
+      .map((kb) => Number(kb.id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+  }
+
+  function getPermittedChatDataSourceIds() {
+    return (dataSources || [])
+      .map((ds) => Number(ds.id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+  }
+
   function resolveChatRuntime() {
     const agent = getActiveAgent();
     const model = getActiveModel();
-    const chatKbIds = agent
-      ? (agent.knowledgeBaseIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0)
-      : getSelectedChatKnowledgeBaseIds();
-    const chatDsIds = agent
-      ? (agent.dataSourceIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0)
-      : getSelectedChatDataSourceIds();
+    const permittedKb = new Set(getPermittedChatKnowledgeBaseIds());
+    const permittedDs = new Set(getPermittedChatDataSourceIds());
+    const chatKbIds = (agent
+      ? (agent.knowledgeBaseIds || []).map(Number)
+      : getSelectedChatKnowledgeBaseIds()
+    ).filter((id) => Number.isFinite(id) && id > 0 && permittedKb.has(id));
+    const chatDsIds = (agent
+      ? (agent.dataSourceIds || []).map(Number)
+      : getSelectedChatDataSourceIds()
+    ).filter((id) => Number.isFinite(id) && id > 0 && permittedDs.has(id));
     return {
       agent,
       model,
@@ -858,6 +892,7 @@ export function initApp() {
   function setActiveModel(id) {
     activeModelId = id;
     models.forEach((m) => { m.active = m.id === id; });
+    platformModels.forEach((m) => { m.active = m.id === id; });
     persistModels();
     renderModelList();
     updateCurrentModelLabel();
@@ -1416,18 +1451,26 @@ export function initApp() {
   }
 
   function getActiveModel() {
-    return models.find((m) => m.id === activeModelId) || null;
+    return platformModels.find((m) => m.id === activeModelId)
+      || models.find((m) => m.id === activeModelId)
+      || null;
+  }
+
+  function isGatewayModel(model) {
+    return Boolean(model && (model.useGateway || model.provider === 'gateway'));
   }
 
   function buildModelPayload(model) {
     if (!model) return null;
+    const gateway = isGatewayModel(model);
     return {
-      provider: model.provider,
-      providerName: model.providerName,
+      provider: gateway ? 'gateway' : model.provider,
+      providerName: model.providerName || (gateway ? '平台 Gateway' : ''),
       name: model.name,
       displayName: model.displayName || model.name,
-      apiKey: model.apiKey || '',
-      baseUrl: model.baseUrl || '',
+      apiKey: gateway ? '' : (model.apiKey || ''),
+      baseUrl: gateway ? '' : (model.baseUrl || ''),
+      useGateway: gateway,
     };
   }
 
@@ -1483,13 +1526,13 @@ export function initApp() {
       });
       return;
     }
-    if (!active.apiKey) {
+    if (!isGatewayModel(active) && !active.apiKey) {
       showChatNotice({
         title: '缺少 API Key',
         subtitle: '当前模型未完成鉴权配置',
-        message: `模型「${active.displayName || active.name}」尚未填写 API Key，请先在配置中心补全后再发送。`,
+        message: `模型「${active.displayName || active.name}」尚未填写 API Key。也可在「模型配置」中选择管理员已配置的平台模型（无需 Key）。`,
         type: 'warn',
-        actionLabel: '去填写 Key',
+        actionLabel: '去配置模型',
         onAction: () => openSettings('model'),
       });
       return;
@@ -1604,7 +1647,23 @@ export function initApp() {
 
   // ===== Settings =====
   function switchToPanel(panelId) {
+    if (panelId === 'users') {
+      openPermissionUsersTab();
+      return;
+    }
     if (!settingsModal) return;
+    if (['agent', 'mcp', 'skill', 'tool'].includes(panelId) && !hasCapability(panelId)) {
+      showAppToast('当前账号无权访问该管理模块', 'warn');
+      return;
+    }
+    if (panelId === 'authz' && !isPlatformAdmin()) {
+      showAppToast('仅管理员可进入授权管理', 'warn');
+      panelId = 'permission';
+    }
+    if (panelId === 'gateway' && !isPlatformAdmin()) {
+      showAppToast('仅管理员可配置逻辑模型与 Gateway 策略', 'warn');
+      panelId = 'model';
+    }
     const navItems = settingsModal.querySelectorAll('.modal-nav-item');
     const panels = document.querySelectorAll('.modal-panel');
     navItems.forEach((item) => item.classList.toggle('active', item.dataset.panel === panelId));
@@ -1613,7 +1672,9 @@ export function initApp() {
       panel.classList.toggle('active', id === panelId);
     });
     if (modalTitleEl) modalTitleEl.textContent = NAV_TITLES[panelId] || '设置';
-    if (panelId === 'model') renderModelList();
+    if (panelId === 'model') { loadPlatformModels().finally(() => renderModelList()); }
+    if (panelId === 'gateway-usage') initGatewayUsagePanel();
+    if (panelId === 'gateway') initGatewayAdminPanel();
     if (panelId === 'datasource') renderDataSourceList();
     if (panelId === 'dataprocess') {
       loadPipelines();
@@ -1621,6 +1682,9 @@ export function initApp() {
     }
     if (panelId === 'permission') {
       initPermissionPanel();
+    }
+    if (panelId === 'authz') {
+      initAuthzPanel();
     }
     if (panelId === 'kb') initKnowledgeBasePanel();
     if (panelId === 'mcp') initMcpPanel();
@@ -1939,20 +2003,136 @@ export function initApp() {
     return 'provider-' + (p || 'custom');
   }
 
+
+  function mapCatalogToPlatformModels(data) {
+    const items = [];
+    (data?.routes || []).forEach((r) => {
+      items.push({
+        id: 'gw:route:' + r.model_id,
+        name: r.model_id,
+        displayName: '路由 · ' + (r.display_name || r.model_id),
+        provider: 'gateway',
+        providerName: '平台路由',
+        apiKey: '',
+        baseUrl: '',
+        useGateway: true,
+        kind: 'route',
+        description: r.description || '',
+        status: 'connected',
+        active: false,
+      });
+    });
+    (data?.models || []).forEach((m) => {
+      items.push({
+        id: 'gw:model:' + m.model_id,
+        name: m.model_id,
+        displayName: m.display_name || m.model_id,
+        provider: 'gateway',
+        providerName: '平台 · ' + (m.provider_name || 'Gateway'),
+        apiKey: '',
+        baseUrl: '',
+        useGateway: true,
+        kind: 'model',
+        status: 'connected',
+        active: false,
+      });
+    });
+    return items;
+  }
+
+  async function loadPlatformModels() {
+    try {
+      const res = await apiFetch('/api/gateway/v1/catalog');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        platformModels = [];
+        return platformModels;
+      }
+      platformModels = mapCatalogToPlatformModels(data);
+      platformModels.forEach((m) => { m.active = m.id === activeModelId; });
+      // If user has no usable personal model, auto-select first platform model
+      const personalOk = models.some((m) => m.id === activeModelId && m.apiKey);
+      const platformOk = platformModels.some((m) => m.id === activeModelId);
+      if ((!activeModelId || (!personalOk && !platformOk)) && platformModels.length) {
+        activeModelId = platformModels[0].id;
+        platformModels.forEach((m) => { m.active = m.id === activeModelId; });
+        models.forEach((m) => { m.active = false; });
+        localStorage.setItem('active_model_id', activeModelId);
+      }
+      updateCurrentModelLabel();
+      return platformModels;
+    } catch (_) {
+      platformModels = [];
+      return platformModels;
+    }
+  }
+
   function renderModelList() {
     if (!modelListEl) return;
-    if (!models.length) {
+    if (!models.length && !platformModels.length) {
       modelListEl.innerHTML = `
         <div class="model-empty">
           <div class="model-empty-icon">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
           </div>
-          <h4>还没有配置任何模型</h4>
-          <p>点击下方「添加模型」接入你的第一个大模型，选择厂商并填写API Key，即可测试连接并设为生效。</p>
+          <h4>还没有可用模型</h4>
+          <p>管理员可在「Gateway 管理」配置平台模型；你也可以点击下方「添加模型」使用自己的 API Key。</p>
         </div>`;
       return;
     }
     modelListEl.innerHTML = '';
+    if (platformModels.length) {
+      const head = document.createElement('div');
+      head.className = 'skill-category-label';
+      head.textContent = '平台模型（管理员已配置，无需填写 Key）';
+      modelListEl.appendChild(head);
+      platformModels.forEach((model) => {
+        const isActive = model.id === activeModelId;
+        const card = document.createElement('div');
+        card.className = 'model-card connected' + (isActive ? ' active-model' : '');
+        card.innerHTML = `
+          <div class="model-card-header">
+            <div class="model-card-left">
+              <span class="model-provider-badge provider-custom">${escapeHtml(model.providerName || '平台')}</span>
+              <span class="model-card-name">${escapeHtml(model.displayName || model.name)}</span>
+            </div>
+            <div class="model-card-actions">
+              <button class="model-activate-btn ${isActive ? 'is-active' : ''}" data-action="activate-platform" data-id="${escapeHtml(model.id)}" ${isActive ? 'disabled' : ''}>
+                <span class="activate-indicator">${isActive ? '✓' : ''}</span>
+                ${isActive ? '当前模型' : '设为当前'}
+              </button>
+            </div>
+          </div>
+          <div class="model-info-row">
+            <span class="model-connection-status connected">
+              <span class="status-dot-sm status-ok"></span>
+              平台托管
+            </span>
+            <span class="model-info-divider"></span>
+            <span class="model-info-item">${model.kind === 'route' ? '路由' : '逻辑模型'} <b>${escapeHtml(model.name)}</b></span>
+            <span class="model-info-divider"></span>
+            <span class="model-info-item">Key <b class="secret-status is-set">服务端</b></span>
+          </div>
+          <div class="model-card-bottom">
+            <div class="model-base-url"><span class="endpoint-label">说明</span>${escapeHtml(model.description || '由管理员在 Gateway 管理中维护')}</div>
+            <div class="model-secondary-actions">
+              <button class="model-test-btn" data-action="test-platform" data-id="${escapeHtml(model.id)}">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+                测试连接
+              </button>
+            </div>
+          </div>
+          <div class="test-result" hidden></div>`;
+        modelListEl.appendChild(card);
+      });
+    }
+    if (models.length) {
+      const head2 = document.createElement('div');
+      head2.className = 'skill-category-label';
+      head2.style.marginTop = '14px';
+      head2.textContent = '我的模型（需自行填写 API Key）';
+      modelListEl.appendChild(head2);
+    }
     models.forEach((model) => {
       const isActive = model.id === activeModelId;
       const card = document.createElement('div');
@@ -1998,6 +2178,44 @@ export function initApp() {
         <div class="test-result" hidden></div>`;
       modelListEl.appendChild(card);
     });
+  }
+
+
+  async function testPlatformConnection(modelId) {
+    const model = platformModels.find((m) => m.id === modelId);
+    if (!model) return;
+    const card = modelListEl?.querySelector('.model-test-btn[data-action="test-platform"][data-id="' + modelId + '"]')?.closest('.model-card');
+    const resultEl = card?.querySelector('.test-result');
+    const testBtn = card?.querySelector('.model-test-btn');
+    if (resultEl) {
+      resultEl.hidden = false;
+      resultEl.className = 'test-result';
+      resultEl.textContent = '正在通过 Gateway 测试平台模型...';
+    }
+    if (testBtn) testBtn.disabled = true;
+    try {
+      const res = await apiFetch('/api/models/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: buildModelPayload(model) }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) {
+        if (resultEl) {
+          resultEl.className = 'test-result error';
+          resultEl.textContent = j.message || j.error || '连接失败';
+        }
+      } else if (resultEl) {
+        resultEl.className = 'test-result ok';
+        resultEl.textContent = '连接成功：' + (j.reply || j.message || 'OK');
+      }
+    } catch (e) {
+      if (resultEl) {
+        resultEl.className = 'test-result error';
+        resultEl.textContent = '连接失败：' + (e.message || e);
+      }
+    }
+    if (testBtn) testBtn.disabled = false;
   }
 
   async function testConnection(modelId) {
@@ -2602,7 +2820,10 @@ export function initApp() {
     if (typeSelect) typeSelect.value = value;
     if (apiHost) apiHost.hidden = value !== 'api';
     if (selfHost) selfHost.hidden = value !== 'self';
-    if (testBtn) testBtn.hidden = value !== 'api';
+    if (testBtn) {
+      testBtn.hidden = value !== 'api';
+      if (value === 'api') testBtn.removeAttribute('hidden');
+    }
     if (deleteBtn) deleteBtn.hidden = !(editingKbModal && editingKbModal.type === 'api' && value === 'api');
     setInlineStatus('createKbModalStatus', '', '');
   }
@@ -2623,6 +2844,7 @@ export function initApp() {
         ? apiKbConfigs.find((item) => item.id === editId) || {}
         : {};
       apiHost.innerHTML = renderKbApiConfigForm(config);
+      bindKbApiConfigForm(apiHost);
     }
     if (selfHost) {
       if (type === 'self') {
@@ -2652,15 +2874,74 @@ export function initApp() {
     renderKbConfigRegistry();
   }
 
+  function kbApiProviderHint(provider) {
+    return ({
+      dify: '建议填写 Dify API 根地址，例如 https://api.dify.ai/v1',
+      fastgpt: '建议填写 FastGPT 知识库接口完整地址',
+      ragflow: '建议填写 RagFlow API 根地址，例如 http://host/api/v1',
+      custom: '填写可访问的 HTTP(S) 检索接口地址',
+    })[provider] || '填写可访问的 HTTP(S) 接口地址';
+  }
+
+  function bindKbApiConfigForm(root) {
+    const providerEl = root?.querySelector('#modalApiProvider') || document.getElementById('modalApiProvider');
+    const urlEl = root?.querySelector('#modalApiUrl') || document.getElementById('modalApiUrl');
+    if (!providerEl || providerEl.dataset.bound === '1') return;
+    providerEl.dataset.bound = '1';
+    const syncHint = () => {
+      if (urlEl) urlEl.placeholder = kbApiProviderHint(providerEl.value || 'custom');
+    };
+    providerEl.addEventListener('change', syncHint);
+    syncHint();
+  }
+
   async function testCreateKbApiConnection() {
     const value = readKbApiConfigForm();
-    if (!/^https?:\/\//i.test(value.url)) {
+    const statusEl = document.getElementById('createKbModalStatus');
+    const btn = document.getElementById('testCreateKbApi');
+    if (!/^https?:\/\//i.test(value.url || '')) {
       setInlineStatus('createKbModalStatus', '请输入有效的 HTTP(S) 接口地址', 'error');
+      showAppToast('请先填写有效的接口地址', 'warn');
+      statusEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      document.getElementById('modalApiUrl')?.focus();
       return;
     }
-    setInlineStatus('createKbModalStatus', '正在检查接口配置..', '');
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    setInlineStatus('createKbModalStatus', '接口配置格式正确', 'ok');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '测试中...';
+    }
+    setInlineStatus('createKbModalStatus', '正在测试接口连接...', '');
+    statusEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    try {
+      const data = await knowledgeApi('/api-config/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: value.provider || 'custom',
+          url: value.url,
+          api_key: value.apiKey || '',
+          dataset_id: value.datasetId || '',
+          headers: value.headers || '',
+        }),
+      });
+      const message = data.message || '连接成功';
+      if (data.ok) {
+        setInlineStatus('createKbModalStatus', message, 'ok');
+        showAppToast(message, 'ok');
+      } else {
+        setInlineStatus('createKbModalStatus', message, 'error');
+        showAppToast(message, 'warn');
+      }
+    } catch (error) {
+      const message = error.message || '连接失败';
+      setInlineStatus('createKbModalStatus', message, 'error');
+      showAppToast(message, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '测试连接';
+      }
+    }
   }
 
   async function submitKbConfigModal() {
@@ -2899,13 +3180,20 @@ export function initApp() {
   async function probeLocalEmbeddingAuthRequired(baseUrl) {
     const raw = (baseUrl || LOCAL_EMBEDDING_BASE_URL).trim().replace(/\/+$/, '');
     const root = raw.replace(/\/v1$/i, '');
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 4000);
     try {
-      const response = await fetch(`${root}/v1/cluster/auth`, { method: 'GET' });
+      const response = await fetch(`${root}/v1/cluster/auth`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
       if (!response.ok) return null;
       const data = await response.json();
       return Boolean(data?.auth);
     } catch (_) {
       return null;
+    } finally {
+      window.clearTimeout(timer);
     }
   }
 
@@ -2980,15 +3268,18 @@ export function initApp() {
 
   function syncChatKbPickerButton(ids = getSelectedChatKnowledgeBaseIds()) {
     const btn = document.getElementById('chatKbPickerBtn');
-    const none = document.getElementById('chatKbNone');
     if (!btn) return;
-    if (!ids.length) {
-      btn.textContent = '不使用知识库';
-      btn.title = '可多选知识库';
-      if (none) none.checked = true;
+    const permitted = getPermittedChatKnowledgeBaseIds();
+    if (!permitted.length) {
+      btn.textContent = '暂无知识库权限';
+      btn.title = '当前账号没有可访问的知识库';
       return;
     }
-    if (none) none.checked = false;
+    if (!ids.length) {
+      btn.textContent = '请选择知识库';
+      btn.title = '列表已按你的权限过滤';
+      return;
+    }
     const names = ids
       .map((id) => knowledgeBases.find((kb) => Number(kb.id) === Number(id))?.name)
       .filter(Boolean);
@@ -3004,18 +3295,22 @@ export function initApp() {
     const list = document.getElementById('chatKbPickerList');
     if (!list) return;
     const enabled = knowledgeBases.filter((kb) => isKbEnabled('self', kb.id));
-    const selected = new Set(
-      loadStoredChatKnowledgeBaseIds().filter((id) => enabled.some((kb) => Number(kb.id) === id))
-    );
+    const permittedIds = enabled.map((kb) => Number(kb.id)).filter((id) => Number.isFinite(id) && id > 0);
+    let selected = loadStoredChatKnowledgeBaseIds().filter((id) => permittedIds.includes(id));
+    // 无历史选择时，默认勾选当前用户有权限的全部知识库
+    if (!selected.length && permittedIds.length) {
+      selected = permittedIds.slice();
+    }
+    const selectedSet = new Set(selected);
     if (!enabled.length) {
-      list.innerHTML = '<div class="chat-kb-picker-empty">暂无可用的自定义知识库</div>';
+      list.innerHTML = '<div class="chat-kb-picker-empty">暂无知识库权限</div>';
       saveSelectedChatKnowledgeBaseIds([]);
       syncChatKbPickerButton([]);
       return;
     }
     list.innerHTML = enabled.map((kb) => `
       <label class="chat-kb-picker-item">
-        <input type="checkbox" data-kb-id="${kb.id}"${selected.has(Number(kb.id)) ? ' checked' : ''}>
+        <input type="checkbox" data-kb-id="${kb.id}"${selectedSet.has(Number(kb.id)) ? ' checked' : ''}>
         <span>${escapeHtml(kb.name)}</span>
       </label>`).join('');
     const ids = getSelectedChatKnowledgeBaseIds();
@@ -3027,7 +3322,6 @@ export function initApp() {
     const picker = document.getElementById('chatKbPicker');
     const btn = document.getElementById('chatKbPickerBtn');
     const menu = document.getElementById('chatKbPickerMenu');
-    const none = document.getElementById('chatKbNone');
     const list = document.getElementById('chatKbPickerList');
     if (!picker || !btn || !menu || picker.dataset.bound) return;
     picker.dataset.bound = '1';
@@ -3038,24 +3332,15 @@ export function initApp() {
       event.stopPropagation();
       menu.hidden = !menu.hidden;
       document.getElementById('chatDsPickerMenu') && (document.getElementById('chatDsPickerMenu').hidden = true);
+      document.getElementById('chatAgentPickerMenu') && (document.getElementById('chatAgentPickerMenu').hidden = true);
     });
     menu.addEventListener('click', (event) => event.stopPropagation());
     document.addEventListener('click', closeMenu);
-
-    none?.addEventListener('change', () => {
-      if (!none.checked) return;
-      list?.querySelectorAll('input[type="checkbox"][data-kb-id]').forEach((input) => {
-        input.checked = false;
-      });
-      saveSelectedChatKnowledgeBaseIds([]);
-      syncChatKbPickerButton([]);
-    });
 
     list?.addEventListener('change', (event) => {
       const input = event.target.closest('input[type="checkbox"][data-kb-id]');
       if (!input) return;
       const ids = getSelectedChatKnowledgeBaseIds();
-      if (none) none.checked = ids.length === 0;
       saveSelectedChatKnowledgeBaseIds(ids);
       syncChatKbPickerButton(ids);
     });
@@ -3090,15 +3375,18 @@ export function initApp() {
 
   function syncChatDsPickerButton(ids = getSelectedChatDataSourceIds()) {
     const btn = document.getElementById('chatDsPickerBtn');
-    const none = document.getElementById('chatDsNone');
     if (!btn) return;
-    if (!ids.length) {
-      btn.textContent = '不使用数据源';
-      btn.title = '可多选数据源（支持只读 SQL）';
-      if (none) none.checked = true;
+    const permitted = getPermittedChatDataSourceIds();
+    if (!permitted.length) {
+      btn.textContent = '暂无数据源权限';
+      btn.title = '当前账号没有可访问的数据源';
       return;
     }
-    if (none) none.checked = false;
+    if (!ids.length) {
+      btn.textContent = '请选择数据源';
+      btn.title = '列表已按你的权限过滤';
+      return;
+    }
     const names = ids
       .map((id) => dataSources.find((ds) => Number(ds.id) === Number(id))?.name)
       .filter(Boolean);
@@ -3109,18 +3397,21 @@ export function initApp() {
   function updateChatDataSourceOptions() {
     const list = document.getElementById('chatDsPickerList');
     if (!list) return;
-    const selected = new Set(
-      loadStoredChatDataSourceIds().filter((id) => dataSources.some((ds) => Number(ds.id) === id))
-    );
+    const permittedIds = getPermittedChatDataSourceIds();
+    let selected = loadStoredChatDataSourceIds().filter((id) => permittedIds.includes(id));
+    if (!selected.length && permittedIds.length) {
+      selected = permittedIds.slice();
+    }
+    const selectedSet = new Set(selected);
     if (!dataSources.length) {
-      list.innerHTML = '<div class="chat-kb-picker-empty">暂无数据源，请先在配置中心添加</div>';
+      list.innerHTML = '<div class="chat-kb-picker-empty">暂无数据源权限</div>';
       saveSelectedChatDataSourceIds([]);
       syncChatDsPickerButton([]);
       return;
     }
     list.innerHTML = dataSources.map((ds) => `
       <label class="chat-kb-picker-item">
-        <input type="checkbox" data-ds-id="${ds.id}"${selected.has(Number(ds.id)) ? ' checked' : ''}>
+        <input type="checkbox" data-ds-id="${ds.id}"${selectedSet.has(Number(ds.id)) ? ' checked' : ''}>
         <span>${escapeHtml(ds.name)} <small style="color:var(--text-muted)">(${escapeHtml(ds.type)} · ${isDsQueryOnly(ds) ? '仅查询' : '可写入'})</small></span>
       </label>`).join('');
     const ids = getSelectedChatDataSourceIds();
@@ -3132,7 +3423,6 @@ export function initApp() {
     const picker = document.getElementById('chatDsPicker');
     const btn = document.getElementById('chatDsPickerBtn');
     const menu = document.getElementById('chatDsPickerMenu');
-    const none = document.getElementById('chatDsNone');
     const list = document.getElementById('chatDsPickerList');
     if (!picker || !btn || !menu || picker.dataset.bound) return;
     picker.dataset.bound = '1';
@@ -3142,24 +3432,15 @@ export function initApp() {
       event.stopPropagation();
       menu.hidden = !menu.hidden;
       document.getElementById('chatKbPickerMenu') && (document.getElementById('chatKbPickerMenu').hidden = true);
+      document.getElementById('chatAgentPickerMenu') && (document.getElementById('chatAgentPickerMenu').hidden = true);
     });
     menu.addEventListener('click', (event) => event.stopPropagation());
     document.addEventListener('click', closeMenu);
-
-    none?.addEventListener('change', () => {
-      if (!none.checked) return;
-      list?.querySelectorAll('input[type="checkbox"][data-ds-id]').forEach((input) => {
-        input.checked = false;
-      });
-      saveSelectedChatDataSourceIds([]);
-      syncChatDsPickerButton([]);
-    });
 
     list?.addEventListener('change', (event) => {
       const input = event.target.closest('input[type="checkbox"][data-ds-id]');
       if (!input) return;
       const ids = getSelectedChatDataSourceIds();
-      if (none) none.checked = ids.length === 0;
       saveSelectedChatDataSourceIds(ids);
       syncChatDsPickerButton(ids);
     });
@@ -3520,23 +3801,48 @@ export function initApp() {
   }
 
   async function testEmbeddingConnection() {
+    const result = document.getElementById('embTestResult');
+    if (result) {
+      result.hidden = false;
+      result.textContent = '准备测试...';
+      result.className = 'test-result';
+    }
     const payload = knowledgeBaseFormPayload();
+    if (!selectedKnowledgeBaseId) {
+      if (result) {
+        result.textContent = '请先保存知识库后再测试 Embedding';
+        result.className = 'test-result error';
+      }
+      showAppToast('请先保存知识库后再测试', 'warn');
+      return;
+    }
     const isLocal = inferEmbeddingDeployMode(payload.embedding_base_url, payload.embedding_model) === 'local';
     let embeddingApiKey = resolveEmbeddingApiKey() || '';
     if (!embeddingApiKey) {
       if (isLocal) {
+        if (result) result.textContent = '正在检测本地 Embedding 服务...';
         const authRequired = await probeLocalEmbeddingAuthRequired(payload.embedding_base_url);
         if (authRequired !== false) {
-          alert(getEmbeddingKeyHint());
+          const hint = getEmbeddingKeyHint();
+          if (result) {
+            result.textContent = hint;
+            result.className = 'test-result error';
+          }
+          alert(hint);
           document.getElementById('embApiKey')?.focus();
           return;
         }
       } else {
         embeddingApiKey = await ensureEmbeddingApiKey();
-        if (embeddingApiKey === null) return;
+        if (embeddingApiKey === null) {
+          if (result) {
+            result.textContent = '请先填写 Embedding API Key';
+            result.className = 'test-result error';
+          }
+          return;
+        }
       }
     }
-    const result = document.getElementById('embTestResult');
     const form = new FormData();
     form.append('embedding_api_key', embeddingApiKey);
     form.append('embedding_model', payload.embedding_model || '');
@@ -3548,8 +3854,10 @@ export function initApp() {
     try {
       const data = await knowledgeApi(`/${selectedKnowledgeBaseId}/embedding/test`, { method: 'POST', body: form });
       if (result) { result.textContent = '连接成功，向量维度：' + data.dimension; result.className = 'test-result success'; }
+      showAppToast('Embedding 连接成功', 'ok');
     } catch (error) {
       if (result) { result.textContent = error.message; result.className = 'test-result error'; }
+      showAppToast(error.message || 'Embedding 测试失败', 'error');
     }
   }
 
@@ -4448,10 +4756,16 @@ export function initApp() {
   function syncChatAgentPickerButton() {
     const btn = document.getElementById('chatAgentPickerBtn');
     if (!btn) return;
+    const enabled = (agentConfigs || []).filter((item) => item && item.enabled !== false);
     const agent = getActiveAgent();
+    if (!enabled.length) {
+      btn.textContent = '暂无 Agent';
+      btn.title = '请先在配置中心启用 Agent';
+      return;
+    }
     if (!agent) {
-      btn.textContent = '自由配置';
-      btn.title = '手动选择模型 / 知识库 / 数据源';
+      btn.textContent = '请选择 Agent';
+      btn.title = '选择已启用的 Agent';
       return;
     }
     btn.textContent = 'Agent：' + agent.name;
@@ -4460,19 +4774,22 @@ export function initApp() {
 
   function updateChatAgentOptions() {
     const list = document.getElementById('chatAgentPickerList');
-    const none = document.getElementById('chatAgentNone');
     if (!list) return;
     const enabled = (agentConfigs || []).filter((item) => item && item.enabled !== false);
     if (!enabled.some((item) => item.id === activeAgentId)) {
-      activeAgentId = '';
+      activeAgentId = enabled.length ? enabled[0].id : '';
       persistAgentData();
+    }
+    if (!enabled.length) {
+      list.innerHTML = '<div class="chat-kb-picker-empty">暂无可用 Agent</div>';
+      syncChatAgentPickerButton();
+      return;
     }
     list.innerHTML = enabled.map((item) => `
       <label class="chat-kb-picker-item">
         <input type="radio" name="chatAgentPick" value="${escapeHtml(item.id)}"${item.id === activeAgentId ? ' checked' : ''}>
         <span>${escapeHtml(item.name)}</span>
       </label>`).join('');
-    if (none) none.checked = !activeAgentId;
     syncChatAgentPickerButton();
   }
 
@@ -4503,8 +4820,8 @@ export function initApp() {
     document.addEventListener('click', closeMenu);
     menu.addEventListener('change', (event) => {
       const input = event.target.closest('input[name="chatAgentPick"]');
-      if (!input) return;
-      setActiveAgent(input.value || '');
+      if (!input || !input.value) return;
+      setActiveAgent(input.value);
       closeMenu();
     });
   }
@@ -4514,6 +4831,303 @@ export function initApp() {
   }
 
   // Expose for inline onclick in HTML
+
+
+  async function gatewayAdminApi(path, options = {}) {
+    const res = await apiFetch('/api/gateway/v1/admin' + path, {
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      ...options,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = typeof data.detail === 'string'
+        ? data.detail
+        : (data.detail?.message || data.message || `请求失败 (${res.status})`);
+      throw new Error(detail);
+    }
+    return data;
+  }
+
+  let gatewayAdminProvidersCache = [];
+
+  async function loadGatewayAdminProviders() {
+    const box = document.getElementById('gatewayAdminProvidersList');
+    const select = document.getElementById('gwModelProvider');
+    const data = await gatewayAdminApi('/providers');
+    gatewayAdminProvidersCache = data.items || [];
+    if (select) {
+      select.innerHTML = gatewayAdminProvidersCache.map((p) =>
+        `<option value="${p.id}">${escapeHtml(p.name)} (${escapeHtml(p.adapter)})${p.has_api_key ? '' : ' · 缺Key'}</option>`
+      ).join('') || '<option value="">暂无厂商</option>';
+    }
+    if (!box) return;
+    if (!gatewayAdminProvidersCache.length) {
+      box.innerHTML = '<div class="doc-empty-hint">暂无厂商，启动种子应已写入 deepseek/qwen/openai/anthropic</div>';
+      return;
+    }
+    box.innerHTML = gatewayAdminProvidersCache.map((p) => `
+      <div class="authz-perm-row" data-provider-id="${p.id}">
+        <div class="authz-perm-row__body">
+          <div class="authz-perm-row__title">
+            <span class="authz-perm-type">${escapeHtml(p.adapter)}</span>
+            <strong>${escapeHtml(p.name)}</strong>
+          </div>
+          <div class="authz-perm-row__meta">
+            <span class="authz-chip">${p.has_api_key ? '已配置 Key' : '未配置 Key'}</span>
+            <span>${escapeHtml(p.base_url || '-')}</span>
+          </div>
+          <div class="authz-grant-form__row" style="margin-top:8px">
+            <div class="form-group" style="grid-column:1/-1">
+              <input class="form-input" data-provider-key="${p.id}" type="password" placeholder="粘贴新 API Key（留空不改）" autocomplete="off">
+            </div>
+          </div>
+        </div>
+        <div class="authz-perm-row__actions">
+          <button type="button" class="btn-secondary" data-provider-save="${p.id}">保存 Key</button>
+        </div>
+      </div>`).join('');
+  }
+
+  async function loadGatewayAdminModels() {
+    const box = document.getElementById('gatewayAdminModelsList');
+    if (!box) return;
+    box.innerHTML = '<div class="doc-empty-hint">加载中…</div>';
+    const data = await gatewayAdminApi('/models');
+    const items = data.items || [];
+    if (!items.length) {
+      box.innerHTML = '<div class="doc-empty-hint">暂无逻辑模型，请在上方表单新增</div>';
+      return;
+    }
+    box.innerHTML = items.map((m) => `
+      <div class="authz-perm-row">
+        <div class="authz-perm-row__body">
+          <div class="authz-perm-row__title">
+            <span class="authz-perm-type">模型</span>
+            <strong>${escapeHtml(m.display_name || m.model_id)}</strong>
+          </div>
+          <div class="authz-perm-row__meta">
+            <span class="authz-chip">${escapeHtml(m.model_id)}</span>
+            <span>${escapeHtml(m.provider_name || '')} → ${escapeHtml(m.upstream_model || '')}</span>
+            <span class="authz-chip">${m.is_active ? '启用' : '停用'}</span>
+          </div>
+        </div>
+        <div class="authz-perm-row__actions">
+          <button type="button" class="btn-secondary danger" data-model-del="${m.id}">删除</button>
+        </div>
+      </div>`).join('');
+  }
+
+  async function loadGatewayAdminRoutes() {
+    const box = document.getElementById('gatewayAdminRoutesList');
+    if (!box) return;
+    box.innerHTML = '<div class="doc-empty-hint">加载中…</div>';
+    const data = await gatewayAdminApi('/routes');
+    const items = data.items || [];
+    if (!items.length) {
+      box.innerHTML = '<div class="doc-empty-hint">暂无路由策略</div>';
+      return;
+    }
+    box.innerHTML = items.map((r) => `
+      <div class="authz-perm-row">
+        <div class="authz-perm-row__body">
+          <div class="authz-perm-row__title">
+            <span class="authz-perm-type">路由</span>
+            <strong>${escapeHtml(r.name)}</strong>
+          </div>
+          <div class="authz-perm-row__meta">
+            <span>${escapeHtml(r.description || '')}</span>
+            <span class="authz-chip">${escapeHtml((r.model_ids || []).join(' → ') || '-')}</span>
+            <span class="authz-chip">${r.is_active ? '启用' : '停用'}</span>
+          </div>
+        </div>
+      </div>`).join('');
+  }
+
+  async function refreshGatewayAdminAll() {
+    if (!isPlatformAdmin()) return;
+    try {
+      await loadGatewayAdminProviders();
+      await loadGatewayAdminModels();
+      await loadGatewayAdminRoutes();
+    } catch (error) {
+      showAppToast(error.message || '加载 Gateway 配置失败', 'error');
+    }
+  }
+
+  function initGatewayAdminPanel() {
+    if (!isPlatformAdmin()) {
+      showAppToast('仅管理员可配置逻辑模型与 Gateway 策略', 'warn');
+      switchToPanel('model');
+      return;
+    }
+    refreshGatewayAdminAll();
+    const root = document.getElementById('panel-gateway');
+    if (root && !root.dataset.bound) {
+      root.dataset.bound = '1';
+      root.querySelectorAll('[data-gateway-tab]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tab = btn.dataset.gatewayTab;
+          root.querySelectorAll('[data-gateway-tab]').forEach((el) => el.classList.toggle('active', el === btn));
+          ['models', 'routes', 'providers'].forEach((name) => {
+            const pane = document.getElementById('gateway-tab-' + name);
+            if (!pane) return;
+            const on = name === tab;
+            pane.hidden = !on;
+            pane.classList.toggle('active', on);
+          });
+        });
+      });
+      document.getElementById('gatewayAdminRefreshModelsBtn')?.addEventListener('click', () => loadGatewayAdminModels().catch((e) => showAppToast(e.message, 'error')));
+      document.getElementById('gatewayAdminRefreshRoutesBtn')?.addEventListener('click', () => loadGatewayAdminRoutes().catch((e) => showAppToast(e.message, 'error')));
+      document.getElementById('gatewayAdminRefreshProvidersBtn')?.addEventListener('click', () => loadGatewayAdminProviders().catch((e) => showAppToast(e.message, 'error')));
+      document.getElementById('gwModelCreateBtn')?.addEventListener('click', async () => {
+        try {
+          const model_id = document.getElementById('gwModelId')?.value?.trim();
+          const display_name = document.getElementById('gwModelDisplay')?.value?.trim() || model_id;
+          const provider_id = Number(document.getElementById('gwModelProvider')?.value || 0);
+          const upstream_model = document.getElementById('gwModelUpstream')?.value?.trim() || model_id;
+          if (!model_id || !provider_id) {
+            showAppToast('请填写逻辑 ID 并选择厂商', 'warn');
+            return;
+          }
+          await gatewayAdminApi('/models', {
+            method: 'POST',
+            body: JSON.stringify({ model_id, display_name, provider_id, upstream_model }),
+          });
+          showAppToast('逻辑模型已创建', 'ok');
+          document.getElementById('gwModelId').value = '';
+          document.getElementById('gwModelDisplay').value = '';
+          document.getElementById('gwModelUpstream').value = '';
+          await loadGatewayAdminModels();
+        } catch (error) {
+          showAppToast(error.message || '创建失败', 'error');
+        }
+      });
+      document.getElementById('gwRouteCreateBtn')?.addEventListener('click', async () => {
+        try {
+          const name = document.getElementById('gwRouteName')?.value?.trim();
+          const description = document.getElementById('gwRouteDesc')?.value?.trim() || '';
+          const model_ids = String(document.getElementById('gwRouteModels')?.value || '')
+            .split(/[,，\s]+/)
+            .map((x) => x.trim())
+            .filter(Boolean);
+          if (!name || !model_ids.length) {
+            showAppToast('请填写策略名与至少一个逻辑模型', 'warn');
+            return;
+          }
+          // create or patch existing by name
+          const existing = (await gatewayAdminApi('/routes')).items || [];
+          const hit = existing.find((r) => r.name === name);
+          if (hit) {
+            await gatewayAdminApi('/routes/' + hit.id, {
+              method: 'PATCH',
+              body: JSON.stringify({ description, model_ids, is_active: true }),
+            });
+            showAppToast('路由策略已更新', 'ok');
+          } else {
+            await gatewayAdminApi('/routes', {
+              method: 'POST',
+              body: JSON.stringify({ name, description, model_ids }),
+            });
+            showAppToast('路由策略已创建', 'ok');
+          }
+          await loadGatewayAdminRoutes();
+        } catch (error) {
+          showAppToast(error.message || '保存路由失败', 'error');
+        }
+      });
+      document.getElementById('gatewayAdminModelsList')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-model-del]');
+        if (!btn) return;
+        if (!confirm('确认删除该逻辑模型？')) return;
+        try {
+          await gatewayAdminApi('/models/' + btn.getAttribute('data-model-del'), { method: 'DELETE' });
+          showAppToast('已删除', 'ok');
+          await loadGatewayAdminModels();
+        } catch (error) {
+          showAppToast(error.message || '删除失败', 'error');
+        }
+      });
+      document.getElementById('gatewayAdminProvidersList')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-provider-save]');
+        if (!btn) return;
+        const id = btn.getAttribute('data-provider-save');
+        const input = document.querySelector(`[data-provider-key="${id}"]`);
+        const api_key = input?.value?.trim() || '';
+        if (!api_key) {
+          showAppToast('请先粘贴 API Key', 'warn');
+          return;
+        }
+        try {
+          await gatewayAdminApi('/providers/' + id, {
+            method: 'PATCH',
+            body: JSON.stringify({ api_key }),
+          });
+          if (input) input.value = '';
+          showAppToast('厂商 Key 已保存', 'ok');
+          await loadGatewayAdminProviders();
+        } catch (error) {
+          showAppToast(error.message || '保存失败', 'error');
+        }
+      });
+    }
+  }
+
+  // usage panel kept
+
+  async function loadGatewayUsage() {
+    const box = document.getElementById('gatewayUsageList');
+    if (!box) return;
+    const groupBy = document.getElementById('gatewayUsageGroupBy')?.value || 'model';
+    box.innerHTML = '<div class="doc-empty-hint">加载中…</div>';
+    try {
+      const res = await apiFetch('/api/gateway/v1/usage?group_by=' + encodeURIComponent(groupBy));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = typeof data.detail === 'string'
+          ? data.detail
+          : (data.detail?.message || data.message || `加载失败 (${res.status})`);
+        throw new Error(detail);
+      }
+      const items = data?.items || [];
+      if (!items.length) {
+        box.innerHTML = '<div class="doc-empty-hint">暂无用量记录。发起对话或测试连接后将出现在此。</div>';
+        return;
+      }
+      const keyName = groupBy === 'user' ? 'user_id' : (groupBy === 'source' ? 'source' : (groupBy === 'day' ? 'day' : 'model_id'));
+      box.innerHTML = items.map((row) => `
+        <div class="authz-perm-row">
+          <div class="authz-perm-row__body">
+            <div class="authz-perm-row__title">
+              <span class="authz-perm-type">${escapeHtml(groupBy)}</span>
+              <strong>${escapeHtml(String(row[keyName] ?? '-'))}</strong>
+            </div>
+            <div class="authz-perm-row__meta">
+              <span class="authz-chip">调用 ${Number(row.calls || 0)}</span>
+              <span class="authz-chip">tokens ${Number(row.total_tokens || 0)}</span>
+              <span class="authz-chip">¥ ${Number(row.cost_cny || 0).toFixed(4)}</span>
+            </div>
+          </div>
+        </div>`).join('');
+    } catch (error) {
+      box.innerHTML = `<div class="doc-empty-hint">${escapeHtml(error.message || '加载失败')}</div>`;
+    }
+  }
+
+  function initGatewayUsagePanel() {
+    loadGatewayUsage();
+    const refresh = document.getElementById('gatewayUsageRefreshBtn');
+    const group = document.getElementById('gatewayUsageGroupBy');
+    if (refresh && !refresh.dataset.bound) {
+      refresh.dataset.bound = '1';
+      refresh.addEventListener('click', loadGatewayUsage);
+    }
+    if (group && !group.dataset.bound) {
+      group.dataset.bound = '1';
+      group.addEventListener('change', loadGatewayUsage);
+    }
+  }
+
   window.openSettings = openSettings;
   window.closeSettings = closeSettings;
   window.switchToPanel = switchToPanel;
@@ -4920,6 +5534,15 @@ export function initApp() {
     if (!btn) return;
     const id = btn.dataset.id;
     const action = btn.dataset.action;
+    if (action === 'activate-platform') {
+      setActiveModel(id);
+      showAppToast('已切换到平台模型', 'ok');
+      return;
+    }
+    if (action === 'test-platform') {
+      testPlatformConnection(id);
+      return;
+    }
     if (action === 'activate') {
       setActiveModel(id);
     }
@@ -4929,8 +5552,9 @@ export function initApp() {
       if (!confirm('确定删除模型「' + (model?.displayName || model?.name || '') + '」？')) return;
       models = models.filter((m) => m.id !== id);
       if (activeModelId === id) {
-        activeModelId = models[0]?.id || null;
+        activeModelId = models[0]?.id || platformModels[0]?.id || null;
         models.forEach((m) => { m.active = m.id === activeModelId; });
+        platformModels.forEach((m) => { m.active = m.id === activeModelId; });
       }
       persistModels();
       renderModelList();
@@ -5128,7 +5752,7 @@ export function initApp() {
       if (key === 'dp' && tab === 'logs') loadPipelineRuns();
       if (key === 'dp' && tab === 'tasks') loadPipelines();
       if (key === 'perm' && tab === 'approval') loadApprovalList();
-      if (key === 'perm' && tab === 'users') loadUserManageList();
+      if (key === 'perm' && tab === 'users') initUsersPanel();
       if (key === 'perm' && tab === 'audit') renderApprovalAuditList();
     });
   });
@@ -5143,6 +5767,48 @@ export function initApp() {
   function isPlatformAdmin() {
     return getPlatformRole() === 'admin';
   }
+
+  function defaultCapabilities(all = false) {
+    return { agent: !!all, mcp: !!all, skill: !!all, tool: !!all };
+  }
+
+  function normalizeCapabilities(raw, asAdmin = false) {
+    const base = defaultCapabilities(asAdmin);
+    const src = raw && typeof raw === 'object' ? raw : {};
+    return {
+      agent: asAdmin ? true : Boolean(src.agent),
+      mcp: asAdmin ? true : Boolean(src.mcp),
+      skill: asAdmin ? true : Boolean(src.skill),
+      tool: asAdmin ? true : Boolean(src.tool),
+    };
+  }
+
+  function getUserCapabilities() {
+    if (isPlatformAdmin()) return defaultCapabilities(true);
+    return normalizeCapabilities(currentAuthUser?.capabilities || {});
+  }
+
+  function hasCapability(name) {
+    const caps = getUserCapabilities();
+    return Boolean(caps?.[name]);
+  }
+
+  function isAuthzCapabilityType(rtype) {
+    return ['capability_agent', 'capability_mcp', 'capability_skill', 'capability_tool'].includes(String(rtype || ''));
+  }
+
+  function authzResourceTypeLabel(rtype) {
+    const map = {
+      knowledge_base: '知识库',
+      datasource: '数据源',
+      capability_agent: 'Agent 管理',
+      capability_mcp: 'MCP 管理',
+      capability_skill: 'Skill 管理',
+      capability_tool: 'Tool 设置',
+    };
+    return map[rtype] || rtype || '资源';
+  }
+
 
   function syncPlatformRoleUi() {
     const role = getPlatformRole();
@@ -5181,9 +5847,26 @@ export function initApp() {
         : '当前为普通用户，仅可查看审批列表；批准 / 驳回需管理员账号。';
     }
     document.getElementById('panel-permission')?.classList.toggle('is-admin', role === 'admin');
-    document.querySelectorAll('[data-perm-tab="users"], [data-perm-panel="users"]').forEach((el) => {
-      if (el.matches('[data-perm-tab="users"]')) el.hidden = role !== 'admin';
+    document.querySelectorAll('[data-admin-only="1"]').forEach((el) => {
+      el.hidden = role !== 'admin';
     });
+    const caps = getUserCapabilities();
+    ['agent', 'mcp', 'skill', 'tool'].forEach((key) => {
+      const panel = document.getElementById('panel-' + key);
+      if (panel) panel.hidden = !caps[key];
+      document.querySelectorAll(`[data-panel="${key}"]`).forEach((el) => {
+        el.hidden = !caps[key];
+      });
+    });
+    if (role !== 'admin' && document.getElementById('panel-authz')?.classList.contains('active')) {
+      switchToPanel('permission');
+    }
+    const activePanel = document.querySelector('.modal-panel.active')?.id || '';
+    const activeKey = activePanel.replace(/^panel-/, '');
+    if (['agent', 'mcp', 'skill', 'tool'].includes(activeKey) && !caps[activeKey]) {
+      switchToPanel('model');
+    }
+    try { window.dispatchEvent(new CustomEvent('ai-platform-auth-changed')); } catch (_) {}
   }
 
   function showLoginOverlay(message = '') {
@@ -5206,6 +5889,100 @@ export function initApp() {
     document.body.classList.remove('login-required');
     const err = document.getElementById('loginError');
     if (err) { err.hidden = true; err.textContent = ''; }
+  }
+
+  function showChangePasswordOverlay(message = '') {
+    hideLoginOverlay();
+    const overlay = document.getElementById('changePasswordOverlay');
+    const err = document.getElementById('changePasswordError');
+    const usernameEl = document.getElementById('changePasswordUsername');
+    const roleEl = document.getElementById('changePasswordUserRole');
+    const username = currentAuthUser?.username || currentAuthUser?.display_name || '-';
+    const roleRaw = (currentAuthUser?.role || '').toString().trim().toLowerCase();
+    const roleLabel = roleRaw === 'admin' ? '管理员' : (roleRaw ? '普通用户' : '-');
+    if (usernameEl) usernameEl.textContent = username;
+    if (roleEl) roleEl.textContent = roleLabel;
+    if (err) {
+      err.hidden = !message;
+      err.textContent = message || '';
+    }
+    overlay?.classList.add('open');
+    overlay?.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('login-required');
+    window.setTimeout(() => document.getElementById('changePasswordCurrent')?.focus(), 50);
+  }
+
+  function hideChangePasswordOverlay() {
+    const overlay = document.getElementById('changePasswordOverlay');
+    overlay?.classList.remove('open');
+    overlay?.setAttribute('aria-hidden', 'true');
+    if (!document.getElementById('loginOverlay')?.classList.contains('open')) {
+      document.body.classList.remove('login-required');
+    }
+    const err = document.getElementById('changePasswordError');
+    if (err) { err.hidden = true; err.textContent = ''; }
+    ['changePasswordCurrent', 'changePasswordNew', 'changePasswordConfirm'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+  }
+
+  async function submitChangePassword() {
+    const currentPassword = document.getElementById('changePasswordCurrent')?.value || '';
+    const newPassword = document.getElementById('changePasswordNew')?.value || '';
+    const confirm = document.getElementById('changePasswordConfirm')?.value || '';
+    const err = document.getElementById('changePasswordError');
+    const btn = document.getElementById('changePasswordSubmitBtn');
+    if (!currentPassword || !newPassword) {
+      if (err) { err.hidden = false; err.textContent = '请填写当前密码和新密码'; }
+      return;
+    }
+    if (newPassword.length < 6) {
+      if (err) { err.hidden = false; err.textContent = '新密码至少 6 位'; }
+      return;
+    }
+    if (newPassword !== confirm) {
+      if (err) { err.hidden = false; err.textContent = '两次输入的新密码不一致'; }
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders(),
+        },
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(formatAuthError(data.detail, data.error || '修改密码失败'));
+      }
+      // Confirm server cleared the force-change flag before entering the app.
+      const me = await refreshAuthUser();
+      if (me?.must_change_password) {
+        throw new Error('密码已提交，但服务器仍要求改密，请刷新后重试或联系管理员');
+      }
+      currentAuthUser = me || data.user || currentAuthUser;
+      if (currentAuthUser) currentAuthUser.must_change_password = false;
+      hideChangePasswordOverlay();
+      syncPlatformRoleUi();
+      await hydrateWorkspaceFromServer();
+      showAppToast('密码已更新', 'ok');
+      loadKnowledgeBases();
+      loadDataSourcesFromApi();
+    } catch (error) {
+      if (err) {
+        err.hidden = false;
+        err.textContent = error.message || '修改密码失败';
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '确认修改'; }
+    }
   }
 
   async function refreshAuthUser() {
@@ -5359,6 +6136,11 @@ export function initApp() {
       await refreshRegisterAvailability();
       return false;
     }
+    if (user.must_change_password) {
+      showChangePasswordOverlay('首次登录请先修改密码后再使用平台功能');
+      return false;
+    }
+    hideChangePasswordOverlay();
     hideLoginOverlay();
     await hydrateWorkspaceFromServer();
     return true;
@@ -5435,6 +6217,10 @@ export function initApp() {
     if (rpc) rpc.value = '';
     hideLoginOverlay();
     syncPlatformRoleUi();
+    if (currentAuthUser?.must_change_password) {
+      showChangePasswordOverlay('首次登录请先修改密码后再使用平台功能');
+      return;
+    }
     await hydrateWorkspaceFromServer();
     showAppToast(`欢迎，${currentAuthUser?.display_name || username}`, 'ok');
     if (document.getElementById('panel-permission')?.classList.contains('active')) {
@@ -5479,6 +6265,20 @@ export function initApp() {
     }
   }
 
+  function validateUsernameInput(username) {
+    const value = String(username || '').trim();
+    if (!value) return '请填写用户名';
+    if (/\s/.test(value)) return '用户名不能包含空格';
+    if (value.length < 2) return '用户名至少 2 个字符';
+    if (value.length > 64) return '用户名最多 64 个字符';
+    if (!/^[\u4e00-\u9fffA-Za-z0-9_\-.]+$/.test(value)) {
+      return '用户名仅支持中文、字母、数字及 _ - .';
+    }
+    if (!/^[\u4e00-\u9fffA-Za-z]/.test(value)) return '用户名需以中文或字母开头';
+    if (/^[0-9_\-.]+$/.test(value)) return '用户名不能为纯数字';
+    return '';
+  }
+
   async function submitRegister() {
     const username = document.getElementById('registerUsername')?.value.trim() || '';
     const displayName = document.getElementById('registerDisplayName')?.value.trim() || '';
@@ -5490,8 +6290,13 @@ export function initApp() {
       if (err) { err.hidden = false; err.textContent = '当前未开放公开注册'; }
       return;
     }
-    if (!username || !password) {
-      if (err) { err.hidden = false; err.textContent = '请填写用户名和密码'; }
+    const usernameError = validateUsernameInput(username);
+    if (usernameError) {
+      if (err) { err.hidden = false; err.textContent = usernameError; }
+      return;
+    }
+    if (!password) {
+      if (err) { err.hidden = false; err.textContent = '请填写密码'; }
       return;
     }
     if (password.length < 6) {
@@ -5605,6 +6410,16 @@ export function initApp() {
     document.getElementById('userRole').value = user?.role === 'admin' ? 'admin' : 'user';
     document.getElementById('userPassword').value = '';
     document.getElementById('userPassword').placeholder = user ? '留空表示不修改密码' : '至少 6 位';
+    const confirmInput = document.getElementById('userPasswordConfirm');
+    const confirmGroup = document.getElementById('userPasswordConfirmGroup');
+    if (confirmInput) confirmInput.value = '';
+    if (confirmGroup) confirmGroup.hidden = false;
+    const help = document.getElementById('userPasswordHelp');
+    if (help) {
+      help.textContent = user
+        ? '填写密码即重置该用户密码；留空则不改密码。'
+        : '新建用户必须设置初始密码。';
+    }
     document.getElementById('addUserModal')?.classList.add('open');
   }
 
@@ -5622,9 +6437,27 @@ export function initApp() {
       showAppToast('请填写用户名', 'warn');
       return;
     }
+    if (!editingUserId) {
+      const usernameError = validateUsernameInput(username);
+      if (usernameError) {
+        showAppToast(usernameError, 'warn');
+        return;
+      }
+    }
     if (!editingUserId && password.length < 6) {
       showAppToast('密码至少 6 位', 'warn');
       return;
+    }
+    if (password) {
+      const confirm = document.getElementById('userPasswordConfirm')?.value || '';
+      if (password !== confirm) {
+        showAppToast('两次输入的密码不一致', 'warn');
+        return;
+      }
+      if (password.length < 6) {
+        showAppToast('密码至少 6 位', 'warn');
+        return;
+      }
     }
     try {
       if (editingUserId) {
@@ -5796,12 +6629,908 @@ export function initApp() {
     }).join('');
   }
 
+
+
+  let authzOptions = { users: [], groups: [], knowledge_bases: [], datasources: [] };
+  let authzGroupsCache = [];
+  let authzGrantsCache = [];
+  let authzBound = false;
+  let authzEditingGroupId = null;
+  let authzSelectedMemberIds = new Set();
+
+  async function authzApi(path = '', options = {}) {
+    const response = await apiFetch('/api/authz' + path, options);
+    if (response.status === 204) return null;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = data.detail;
+      let message = data.error || data.message || ('请求失败（HTTP ' + response.status + '）');
+      if (typeof detail === 'string') message = detail;
+      else if (Array.isArray(detail)) message = detail.map((x) => x.msg || x.detail || String(x)).join('；');
+      throw new Error(message);
+    }
+    return data;
+  }
+
+  function authzItemLabel(item, kind) {
+    if (!item || typeof item !== 'object') return '';
+    if (kind === 'user') {
+      const name = item.display_name || item.username || (item.id != null ? ('#' + item.id) : '');
+      return item.username && item.display_name && item.display_name !== item.username
+        ? `${name}（${item.username}）`
+        : name;
+    }
+    return item.name || item.display_name || item.username || (item.id != null ? ('#' + item.id) : '');
+  }
+
+  function authzItemMeta(item, kind) {
+    if (!item) return '';
+    if (kind === 'user') return `ID ${item.id} · ${item.role === 'admin' ? '管理员' : '普通用户'}`;
+    if (kind === 'group') return `ID ${item.id}`;
+    return `ID ${item.id}`;
+  }
+
+  function closeAllAuthzPickers(exceptId = '') {
+    ['authzGrantResourcePanel', 'authzGrantGranteePanel', 'authzLookupSubjectPanel'].forEach((id) => {
+      if (exceptId && id === exceptId) return;
+      const el = document.getElementById(id);
+      if (el) el.hidden = true;
+    });
+  }
+
+  function renderSearchPickerList({
+    listEl,
+    items,
+    keyword,
+    selectedId,
+    kind,
+    onPick,
+  }) {
+    if (!listEl) return;
+    const q = String(keyword || '').trim().toLowerCase();
+    const filtered = (items || []).filter((item) => {
+      if (!q) return true;
+      const hay = `${authzItemLabel(item, kind)} ${item.username || ''} ${item.name || ''} ${item.id}`.toLowerCase();
+      return hay.includes(q);
+    });
+    if (!filtered.length) {
+      listEl.innerHTML = '<div class="search-picker__empty">无匹配项，请调整关键字</div>';
+      return;
+    }
+    listEl.innerHTML = filtered.map((item) => {
+      const active = String(item.id) === String(selectedId || '');
+      return `
+        <button type="button" class="search-picker__item ${active ? 'is-active' : ''}" data-id="${item.id}">
+          <strong>${escapeHtml(authzItemLabel(item, kind))}</strong>
+          <span>${escapeHtml(authzItemMeta(item, kind))}</span>
+        </button>`;
+    }).join('');
+    listEl.querySelectorAll('[data-id]').forEach((btn) => {
+      btn.addEventListener('click', () => onPick(Number(btn.getAttribute('data-id'))));
+    });
+  }
+
+  function setPickerValue({ hiddenId, triggerId, item, kind, emptyText }) {
+    const hidden = document.getElementById(hiddenId);
+    const trigger = document.getElementById(triggerId);
+    const valid = item && typeof item === 'object' && item.id != null;
+    if (hidden) hidden.value = valid ? String(item.id) : '';
+    if (trigger) {
+      trigger.textContent = valid ? (authzItemLabel(item, kind) || emptyText) : emptyText;
+      trigger.classList.toggle('is-empty', !valid);
+    }
+  }
+
+  function syncAuthzGrantResourceTypeUi() {
+    const rtype = document.getElementById('authzGrantResourceType')?.value || 'knowledge_base';
+    const isCap = isAuthzCapabilityType(rtype);
+    const pickGroup = document.getElementById('authzGrantResourcePickGroup');
+    const picker = document.getElementById('authzResourcePicker');
+    const hint = document.getElementById('authzGrantCapabilityHint');
+    const hidden = document.getElementById('authzGrantResourceId');
+    const trigger = document.getElementById('authzGrantResourceTrigger');
+    if (pickGroup) pickGroup.classList.toggle('is-capability', isCap);
+    if (picker) picker.hidden = isCap;
+    if (hint) hint.hidden = !isCap;
+    if (isCap) {
+      if (hidden) hidden.value = '0';
+      if (trigger) {
+        trigger.textContent = authzResourceTypeLabel(rtype);
+        trigger.classList.remove('is-empty');
+      }
+      closeAllAuthzPickers();
+    } else if (hidden && hidden.value === '0') {
+      hidden.value = '';
+      if (trigger) {
+        trigger.textContent = '搜索并选择资源';
+        trigger.classList.add('is-empty');
+      }
+    }
+  }
+
+  function getAuthzResourceItems() {
+    const rtype = document.getElementById('authzGrantResourceType')?.value || 'knowledge_base';
+    return rtype === 'datasource' ? (authzOptions.datasources || []) : (authzOptions.knowledge_bases || []);
+  }
+
+  function getAuthzGranteeItems() {
+    const gtype = document.getElementById('authzGrantGranteeType')?.value || 'user';
+    return gtype === 'group' ? (authzOptions.groups || []) : (authzOptions.users || []);
+  }
+
+  function refreshAuthzResourcePicker(keyword = '') {
+    const items = getAuthzResourceItems();
+    const selectedId = document.getElementById('authzGrantResourceId')?.value || '';
+    const selected = items.find((x) => String(x.id) === String(selectedId));
+    const kind = 'resource';
+    setPickerValue({
+      hiddenId: 'authzGrantResourceId',
+      triggerId: 'authzGrantResourceTrigger',
+      item: selected,
+      kind,
+      emptyText: '点击搜索并选择资源',
+    });
+    renderSearchPickerList({
+      listEl: document.getElementById('authzGrantResourceList'),
+      items,
+      keyword,
+      selectedId,
+      kind,
+      onPick: (id) => {
+        const item = items.find((x) => Number(x.id) === Number(id));
+        setPickerValue({
+          hiddenId: 'authzGrantResourceId',
+          triggerId: 'authzGrantResourceTrigger',
+          item,
+          kind,
+          emptyText: '点击搜索并选择资源',
+        });
+        closeAllAuthzPickers();
+      },
+    });
+  }
+
+  function refreshAuthzGranteePicker(keyword = '') {
+    const gtype = document.getElementById('authzGrantGranteeType')?.value || 'user';
+    const items = getAuthzGranteeItems();
+    const selectedId = document.getElementById('authzGrantGranteeId')?.value || '';
+    const selected = items.find((x) => String(x.id) === String(selectedId));
+    const kind = gtype === 'group' ? 'group' : 'user';
+    setPickerValue({
+      hiddenId: 'authzGrantGranteeId',
+      triggerId: 'authzGrantGranteeTrigger',
+      item: selected,
+      kind,
+      emptyText: gtype === 'group' ? '点击搜索并选择用户组' : '点击搜索并选择用户',
+    });
+    renderSearchPickerList({
+      listEl: document.getElementById('authzGrantGranteeList'),
+      items,
+      keyword,
+      selectedId,
+      kind,
+      onPick: (id) => {
+        const item = items.find((x) => Number(x.id) === Number(id));
+        setPickerValue({
+          hiddenId: 'authzGrantGranteeId',
+          triggerId: 'authzGrantGranteeTrigger',
+          item,
+          kind,
+          emptyText: gtype === 'group' ? '点击搜索并选择用户组' : '点击搜索并选择用户',
+        });
+        closeAllAuthzPickers();
+      },
+    });
+  }
+
+  function refreshAuthzGrantSelectors() {
+    // Reset selected values when type changes.
+    const resourceHidden = document.getElementById('authzGrantResourceId');
+    const granteeHidden = document.getElementById('authzGrantGranteeId');
+    if (resourceHidden) resourceHidden.value = '';
+    if (granteeHidden) granteeHidden.value = '';
+    const resourceSearch = document.getElementById('authzGrantResourceSearch');
+    const granteeSearch = document.getElementById('authzGrantGranteeSearch');
+    if (resourceSearch) resourceSearch.value = '';
+    if (granteeSearch) granteeSearch.value = '';
+    refreshAuthzResourcePicker('');
+    refreshAuthzGranteePicker('');
+    syncAuthzGrantResourceTypeUi();
+  }
+
+  async function loadAuthzOptions() {
+    authzOptions = await authzApi('/options');
+    refreshAuthzResourcePicker(document.getElementById('authzGrantResourceSearch')?.value || '');
+    refreshAuthzGranteePicker(document.getElementById('authzGrantGranteeSearch')?.value || '');
+  }
+
+  function renderAuthzGroups(keyword = '') {
+    const list = document.getElementById('authzGroupList');
+    if (!list) return;
+    const q = String(keyword || '').trim().toLowerCase();
+    const rows = (authzGroupsCache || []).filter((g) => {
+      if (!q) return true;
+      return `${g.name || ''} ${g.description || ''}`.toLowerCase().includes(q);
+    });
+    if (!rows.length) {
+      if (authzGroupsCache.length) {
+        list.innerHTML = '<div class="doc-empty-hint">无匹配用户组</div>';
+      } else {
+        list.innerHTML = `
+          <div class="authz-group-empty">
+            <strong>还没有用户组</strong>
+            <span>创建用户组并添加成员后，可在「资源授权」中一次性授权给整组。</span>
+            <button type="button" class="btn-primary" id="authzCreateGroupEmptyBtn">新建用户组</button>
+          </div>`;
+        document.getElementById('authzCreateGroupEmptyBtn')?.addEventListener('click', createAuthzGroup);
+      }
+      return;
+    }
+    list.innerHTML = rows.map((g) => {
+      const name = g.name || ('组 #' + g.id);
+      const initial = Array.from(String(name))[0] || 'G';
+      const desc = (g.description || '').trim() || '暂无描述';
+      const count = Number(g.member_count || 0);
+      return `
+      <div class="authz-group-card" data-group-id="${g.id}">
+        <div class="authz-group-card__top">
+          <div class="authz-group-card__avatar" aria-hidden="true">${escapeHtml(initial)}</div>
+          <div class="authz-group-card__body">
+            <strong title="${escapeHtml(name)}">${escapeHtml(name)}</strong>
+            <p title="${escapeHtml(desc)}">${escapeHtml(desc)}</p>
+          </div>
+        </div>
+        <div class="authz-group-card__meta">
+          <span class="authz-chip">${count} 名成员</span>
+          <span class="authz-chip is-muted">ID ${g.id}</span>
+        </div>
+        <div class="authz-group-card__actions">
+          <button type="button" class="btn-secondary" data-authz-edit-group="${g.id}">编辑</button>
+          <button type="button" class="btn-secondary danger" data-authz-del-group="${g.id}">删除</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function loadAuthzGroups() {
+    const list = document.getElementById('authzGroupList');
+    if (!list) return;
+    list.innerHTML = '<div class="doc-empty-hint">加载中...</div>';
+    try {
+      authzGroupsCache = await authzApi('/groups');
+      renderAuthzGroups(document.getElementById('authzGroupSearchInput')?.value || '');
+    } catch (error) {
+      list.innerHTML = `<div class="doc-empty-hint">${escapeHtml(error.message || '加载失败')}</div>`;
+    }
+  }
+
+  function renderAuthzGrants(keyword = '') {
+    const list = document.getElementById('authzGrantList');
+    if (!list) return;
+    const q = String(keyword || '').trim().toLowerCase();
+    const rows = (authzGrantsCache || []).filter((g) => {
+      if (!q) return true;
+      const hay = `${g.resource_type || ''} ${g.resource_name || ''} ${g.grantee_type || ''} ${g.grantee_name || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+    if (!rows.length) {
+      list.innerHTML = `<div class="doc-empty-hint">${authzGrantsCache.length ? '无匹配授权记录' : '暂无授权记录'}</div>`;
+      return;
+    }
+    list.innerHTML = rows.map((g) => {
+      const rlabel = authzResourceTypeLabel(g.resource_type);
+      const glabel = g.grantee_type === 'group' ? '用户组' : '用户';
+      const plabel = g.permission === 'manage' ? '管理' : '使用';
+      return `
+      <div class="authz-perm-row" data-grant-id="${g.id}">
+        <div class="authz-perm-row__body">
+          <div class="authz-perm-row__title">
+            <span class="authz-perm-type">${escapeHtml(rlabel)}</span>
+            <strong>${escapeHtml(g.resource_name || '')}</strong>
+          </div>
+          <div class="authz-perm-row__meta">
+            <span>授权给 ${escapeHtml(glabel)}「${escapeHtml(g.grantee_name || '')}」</span>
+            <span class="authz-chip">${escapeHtml(plabel)}</span>
+          </div>
+        </div>
+        <div class="authz-perm-row__actions">
+          <button type="button" class="btn-secondary danger" data-authz-del-grant="${g.id}">撤销</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function loadAuthzGrants() {
+    const list = document.getElementById('authzGrantList');
+    if (!list) return;
+    list.innerHTML = '<div class="doc-empty-hint">加载中...</div>';
+    try {
+      authzGrantsCache = await authzApi('/grants');
+      renderAuthzGrants(document.getElementById('authzGrantSearchInput')?.value || '');
+    } catch (error) {
+      list.innerHTML = `<div class="doc-empty-hint">${escapeHtml(error.message || '加载失败')}</div>`;
+    }
+  }
+
+  function updateAuthzMemberHint() {
+    const hint = document.getElementById('authzGroupMemberHint');
+    if (hint) hint.textContent = `已选 ${authzSelectedMemberIds.size} 人`;
+  }
+
+  function renderAuthzMemberChecklist(keyword = '') {
+    const list = document.getElementById('authzGroupMemberList');
+    if (!list) return;
+    const q = String(keyword || '').trim().toLowerCase();
+    const users = (authzOptions.users || []).filter((u) => {
+      if (!q) return true;
+      const hay = `${u.display_name || ''} ${u.username || ''} ${u.id}`.toLowerCase();
+      return hay.includes(q);
+    });
+    if (!users.length) {
+      list.innerHTML = '<div class="search-picker__empty">无匹配用户</div>';
+      updateAuthzMemberHint();
+      return;
+    }
+    list.innerHTML = users.map((u) => {
+      const checked = authzSelectedMemberIds.has(Number(u.id)) ? 'checked' : '';
+      return `
+        <label class="member-check-item">
+          <input type="checkbox" data-member-id="${u.id}" ${checked}>
+          <span class="member-check-meta">
+            <strong>${escapeHtml(u.display_name || u.username || ('#' + u.id))}</strong>
+            <span>${escapeHtml(u.username || '')} · ${u.role === 'admin' ? '管理员' : '普通用户'}</span>
+          </span>
+        </label>`;
+    }).join('');
+    list.querySelectorAll('input[data-member-id]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const id = Number(input.getAttribute('data-member-id'));
+        if (input.checked) authzSelectedMemberIds.add(id);
+        else authzSelectedMemberIds.delete(id);
+        updateAuthzMemberHint();
+      });
+    });
+    updateAuthzMemberHint();
+  }
+
+  function openAuthzGroupModal(group = null) {
+    authzEditingGroupId = group?.id || null;
+    document.getElementById('authzGroupModalTitle').textContent = group ? '编辑用户组' : '新建用户组';
+    document.getElementById('editingAuthzGroupId').value = group?.id || '';
+    document.getElementById('authzGroupName').value = group?.name || '';
+    document.getElementById('authzGroupDesc').value = group?.description || '';
+    document.getElementById('authzGroupMemberSearch').value = '';
+    const err = document.getElementById('authzGroupModalError');
+    if (err) { err.hidden = true; err.textContent = ''; }
+    authzSelectedMemberIds = new Set((group?.member_ids || []).map((x) => Number(x)));
+    renderAuthzMemberChecklist('');
+    document.getElementById('authzGroupModal')?.classList.add('open');
+    window.setTimeout(() => document.getElementById('authzGroupName')?.focus(), 40);
+  }
+
+  function closeAuthzGroupModal() {
+    document.getElementById('authzGroupModal')?.classList.remove('open');
+    authzEditingGroupId = null;
+  }
+
+  async function createAuthzGroup() {
+    await loadAuthzOptions();
+    openAuthzGroupModal(null);
+  }
+
+  async function editAuthzGroup(groupId) {
+    await loadAuthzOptions();
+    const group = (authzGroupsCache || []).find((g) => Number(g.id) === Number(groupId))
+      || (await authzApi('/groups')).find((g) => Number(g.id) === Number(groupId));
+    if (!group) {
+      showAppToast('用户组不存在', 'warn');
+      return;
+    }
+    openAuthzGroupModal(group);
+  }
+
+  async function saveAuthzGroupModal() {
+    const name = document.getElementById('authzGroupName')?.value.trim() || '';
+    const description = document.getElementById('authzGroupDesc')?.value.trim() || '';
+    const err = document.getElementById('authzGroupModalError');
+    const btn = document.getElementById('saveAuthzGroupBtn');
+    if (!name) {
+      if (err) { err.hidden = false; err.textContent = '请填写组名'; }
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+    try {
+      let groupId = authzEditingGroupId;
+      if (groupId) {
+        await authzApi('/groups/' + groupId, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, description }),
+        });
+      } else {
+        const created = await authzApi('/groups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, description }),
+        });
+        groupId = created.id;
+      }
+      await authzApi('/groups/' + groupId + '/members', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_ids: [...authzSelectedMemberIds] }),
+      });
+      closeAuthzGroupModal();
+      showAppToast('用户组已保存', 'ok');
+      await loadAuthzOptions();
+      await loadAuthzGroups();
+    } catch (error) {
+      if (err) {
+        err.hidden = false;
+        err.textContent = error.message || '保存失败';
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+    }
+  }
+
+  async function deleteAuthzGroup(groupId) {
+    if (!window.confirm('确定删除该用户组？相关组授权也会一并删除。')) return;
+    try {
+      await authzApi('/groups/' + groupId, { method: 'DELETE' });
+      showAppToast('用户组已删除', 'ok');
+      await loadAuthzOptions();
+      await loadAuthzGroups();
+      await loadAuthzGrants();
+    } catch (error) {
+      showAppToast(error.message || '删除失败', 'error');
+    }
+  }
+
+  async function submitAuthzGrant() {
+    const resource_type = document.getElementById('authzGrantResourceType')?.value;
+    const isCap = isAuthzCapabilityType(resource_type);
+    const resource_id = isCap ? 0 : Number(document.getElementById('authzGrantResourceId')?.value || 0);
+    const grantee_type = document.getElementById('authzGrantGranteeType')?.value;
+    const grantee_id = Number(document.getElementById('authzGrantGranteeId')?.value || 0);
+    if (!resource_type || !grantee_type || !grantee_id || (!isCap && !resource_id)) {
+      showAppToast(isCap ? '请完整选择能力与授权对象' : '请完整选择资源与授权对象', 'warn');
+      return;
+    }
+    try {
+      await authzApi('/grants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resource_type,
+          resource_id,
+          grantee_type,
+          grantee_id,
+          permission: isCap ? 'manage' : 'use',
+        }),
+      });
+      showAppToast('授权成功', 'ok');
+      const resourceHidden = document.getElementById('authzGrantResourceId');
+      const granteeHidden = document.getElementById('authzGrantGranteeId');
+      if (!isCap && resourceHidden) resourceHidden.value = '';
+      if (granteeHidden) granteeHidden.value = '';
+      syncAuthzGrantResourceTypeUi();
+      if (!isCap) refreshAuthzResourcePicker(document.getElementById('authzGrantResourceSearch')?.value || '');
+      refreshAuthzGranteePicker(document.getElementById('authzGrantGranteeSearch')?.value || '');
+      await loadAuthzGrants();
+    } catch (error) {
+      showAppToast(error.message || '授权失败', 'error');
+    }
+  }
+
+  async function deleteAuthzGrant(grantId) {
+    if (!window.confirm('确认撤销该授权？')) return false;
+    try {
+      await authzApi('/grants/' + grantId, { method: 'DELETE' });
+      showAppToast('已撤销', 'ok');
+      await loadAuthzGrants();
+      return true;
+    } catch (error) {
+      showAppToast(error.message || '撤销失败', 'error');
+      return false;
+    }
+  }
+
+
+  function getAuthzLookupSubjectItems() {
+    const stype = document.getElementById('authzLookupSubjectType')?.value || 'user';
+    return stype === 'group' ? (authzOptions.groups || []) : (authzOptions.users || []);
+  }
+
+  function refreshAuthzLookupSubjectPicker(keyword = '') {
+    const stype = document.getElementById('authzLookupSubjectType')?.value || 'user';
+    const items = getAuthzLookupSubjectItems();
+    const selectedId = document.getElementById('authzLookupSubjectId')?.value || '';
+    const selected = items.find((x) => String(x.id) === String(selectedId));
+    const kind = stype === 'group' ? 'group' : 'user';
+    setPickerValue({
+      hiddenId: 'authzLookupSubjectId',
+      triggerId: 'authzLookupSubjectTrigger',
+      item: selected,
+      kind,
+      emptyText: stype === 'group' ? '搜索并选择用户组' : '搜索并选择用户',
+    });
+    renderSearchPickerList({
+      listEl: document.getElementById('authzLookupSubjectList'),
+      items,
+      keyword,
+      selectedId,
+      kind,
+      onPick: (id) => {
+        const item = items.find((x) => Number(x.id) === Number(id));
+        setPickerValue({
+          hiddenId: 'authzLookupSubjectId',
+          triggerId: 'authzLookupSubjectTrigger',
+          item,
+          kind,
+          emptyText: stype === 'group' ? '搜索并选择用户组' : '搜索并选择用户',
+        });
+        closeAllAuthzPickers();
+      },
+    });
+  }
+
+  function resetAuthzLookupResult(message = '请选择用户或用户组后点击「查询权限」。') {
+    const box = document.getElementById('authzLookupResult');
+    if (box) box.innerHTML = `<div class="doc-empty-hint">${escapeHtml(message)}</div>`;
+  }
+
+  function clearAuthzLookupForm() {
+    const hidden = document.getElementById('authzLookupSubjectId');
+    if (hidden) hidden.value = '';
+    const search = document.getElementById('authzLookupSubjectSearch');
+    if (search) search.value = '';
+    refreshAuthzLookupSubjectPicker('');
+    resetAuthzLookupResult();
+  }
+
+  function renderAuthzLookupResult(payload) {
+    const box = document.getElementById('authzLookupResult');
+    if (!box) return;
+    const subject = payload?.subject || {};
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const groups = Array.isArray(payload?.groups) ? payload.groups : [];
+    const isUser = subject.type === 'user';
+    const typeLabel = isUser ? '用户' : '用户组';
+    const name = subject.name || ('#' + (subject.id || ''));
+    const chips = [
+      `<span class="authz-chip">${escapeHtml(typeLabel)}</span>`,
+      `<span class="authz-chip is-muted">共 ${items.length} 项</span>`,
+    ];
+    if (isUser && subject.username) {
+      chips.push(`<span class="authz-chip is-muted">@${escapeHtml(subject.username)}</span>`);
+    }
+    if (subject.is_admin) {
+      chips.push('<span class="authz-chip is-admin">管理员</span>');
+    }
+    if (!isUser && subject.member_count != null) {
+      chips.push(`<span class="authz-chip is-muted">${Number(subject.member_count)} 名成员</span>`);
+    }
+    if (isUser && groups.length) {
+      chips.push(`<span class="authz-chip is-muted">所属组 ${groups.length}</span>`);
+    }
+
+    const note = payload?.note
+      ? `<div class="authz-lookup-note">${escapeHtml(payload.note)}</div>`
+      : '';
+
+    let listHtml;
+    if (!items.length) {
+      listHtml = '<div class="doc-empty-hint">未查询到权限记录</div>';
+    } else {
+      listHtml = items.map((item) => {
+        const rlabel = authzResourceTypeLabel(item.resource_type);
+        const plabel = item.permission === 'manage' ? '管理' : '使用';
+        const source = item.source || 'direct';
+        const sourceClass = source === 'owner' ? 'is-owner' : (source === 'group' ? 'is-group' : 'is-direct');
+        const sourceLabel = item.source_label || source;
+        const revokeBtn = item.grant_id
+          ? `<button type="button" class="btn-secondary danger" data-authz-del-grant="${item.grant_id}">撤销</button>`
+          : '';
+        return `
+          <div class="authz-perm-row" data-grant-id="${item.grant_id || ''}">
+            <div class="authz-perm-row__body">
+              <div class="authz-perm-row__title">
+                <span class="authz-perm-type">${escapeHtml(rlabel)}</span>
+                <strong>${escapeHtml(item.resource_name || '')}</strong>
+              </div>
+              <div class="authz-perm-row__meta">
+                <span class="authz-chip">${escapeHtml(plabel)}</span>
+                <span class="authz-source ${sourceClass}">${escapeHtml(sourceLabel)}</span>
+              </div>
+            </div>
+            <div class="authz-perm-row__actions">${revokeBtn}</div>
+          </div>`;
+      }).join('');
+      listHtml = `<div class="authz-perm-list">${listHtml}</div>`;
+    }
+
+    box.innerHTML = `
+      <div class="authz-lookup-summary">
+        <strong>${escapeHtml(name)}</strong>
+        ${chips.join('')}
+      </div>
+      ${note}
+      ${listHtml}`;
+  }
+
+  async function queryAuthzPermissions() {
+    const subject_type = document.getElementById('authzLookupSubjectType')?.value || 'user';
+    const subject_id = Number(document.getElementById('authzLookupSubjectId')?.value || 0);
+    const btn = document.getElementById('authzLookupSubmitBtn');
+    if (!subject_id) {
+      showAppToast('请先选择用户或用户组', 'warn');
+      return;
+    }
+    const box = document.getElementById('authzLookupResult');
+    if (box) box.innerHTML = '<div class="doc-empty-hint">查询中...</div>';
+    if (btn) { btn.disabled = true; btn.textContent = '查询中...'; }
+    try {
+      const qs = new URLSearchParams({
+        subject_type,
+        subject_id: String(subject_id),
+      });
+      const payload = await authzApi('/permissions?' + qs.toString());
+      renderAuthzLookupResult(payload);
+    } catch (error) {
+      resetAuthzLookupResult(error.message || '查询失败');
+      showAppToast(error.message || '查询失败', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '查询权限'; }
+    }
+  }
+
+  function bindAuthzPanelEvents() {
+    if (authzBound) return;
+    authzBound = true;
+    document.querySelectorAll('[data-authz-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.authzTab;
+        document.querySelectorAll('[data-authz-tab]').forEach((el) => el.classList.toggle('active', el === btn));
+        const groupsTab = document.getElementById('authz-tab-groups');
+        const grantsTab = document.getElementById('authz-tab-grants');
+        const lookupTab = document.getElementById('authz-tab-lookup');
+        if (groupsTab) { groupsTab.hidden = tab !== 'groups'; groupsTab.classList.toggle('active', tab === 'groups'); }
+        if (grantsTab) { grantsTab.hidden = tab !== 'grants'; grantsTab.classList.toggle('active', tab === 'grants'); }
+        if (lookupTab) { lookupTab.hidden = tab !== 'lookup'; lookupTab.classList.toggle('active', tab === 'lookup'); }
+        if (tab === 'groups') loadAuthzGroups();
+        if (tab === 'grants') { loadAuthzOptions(); }
+        if (tab === 'lookup') {
+          loadAuthzOptions().then(() => {
+            refreshAuthzLookupSubjectPicker(document.getElementById('authzLookupSubjectSearch')?.value || '');
+            return loadAuthzGrants();
+          });
+        }
+      });
+    });
+
+    document.getElementById('authzCreateGroupBtn')?.addEventListener('click', createAuthzGroup);
+    document.getElementById('authzRefreshGroupsBtn')?.addEventListener('click', loadAuthzGroups);
+    document.getElementById('authzRefreshGrantsBtn')?.addEventListener('click', () => loadAuthzOptions().then(loadAuthzGrants));
+    document.getElementById('authzGrantSubmitBtn')?.addEventListener('click', submitAuthzGrant);
+    document.getElementById('authzGrantResourceType')?.addEventListener('change', () => {
+      syncAuthzGrantResourceTypeUi();
+      if (!isAuthzCapabilityType(document.getElementById('authzGrantResourceType')?.value)) {
+        refreshAuthzGrantSelectors();
+      }
+    });
+    document.getElementById('authzGrantGranteeType')?.addEventListener('change', () => {
+      const granteeHidden = document.getElementById('authzGrantGranteeId');
+      if (granteeHidden) granteeHidden.value = '';
+      const granteeSearch = document.getElementById('authzGrantGranteeSearch');
+      if (granteeSearch) granteeSearch.value = '';
+      refreshAuthzGranteePicker('');
+    });
+
+    document.getElementById('authzGrantResourceTrigger')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const panel = document.getElementById('authzGrantResourcePanel');
+      const open = panel && !panel.hidden;
+      closeAllAuthzPickers();
+      if (panel) panel.hidden = open;
+      if (!open) {
+        refreshAuthzResourcePicker(document.getElementById('authzGrantResourceSearch')?.value || '');
+        document.getElementById('authzGrantResourceSearch')?.focus();
+      }
+    });
+    document.getElementById('authzGrantGranteeTrigger')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const panel = document.getElementById('authzGrantGranteePanel');
+      const open = panel && !panel.hidden;
+      closeAllAuthzPickers();
+      if (panel) panel.hidden = open;
+      if (!open) {
+        refreshAuthzGranteePicker(document.getElementById('authzGrantGranteeSearch')?.value || '');
+        document.getElementById('authzGrantGranteeSearch')?.focus();
+      }
+    });
+    document.getElementById('authzGrantResourceSearch')?.addEventListener('input', (e) => {
+      refreshAuthzResourcePicker(e.target.value || '');
+    });
+    document.getElementById('authzGrantGranteeSearch')?.addEventListener('input', (e) => {
+      refreshAuthzGranteePicker(e.target.value || '');
+    });
+    document.getElementById('authzGrantResourcePanel')?.addEventListener('click', (e) => e.stopPropagation());
+    document.getElementById('authzGrantGranteePanel')?.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => closeAllAuthzPickers());
+
+    document.getElementById('authzGroupSearchInput')?.addEventListener('input', (e) => {
+      renderAuthzGroups(e.target.value || '');
+    });
+    document.getElementById('authzGrantSearchInput')?.addEventListener('input', (e) => {
+      renderAuthzGrants(e.target.value || '');
+    });
+
+    document.getElementById('authzGroupList')?.addEventListener('click', (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLElement)) return;
+      const editId = t.getAttribute('data-authz-edit-group');
+      const did = t.getAttribute('data-authz-del-group');
+      if (editId) editAuthzGroup(editId);
+      if (did) deleteAuthzGroup(did);
+    });
+    document.getElementById('authzGrantList')?.addEventListener('click', (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLElement)) return;
+      const gid = t.getAttribute('data-authz-del-grant');
+      if (gid) deleteAuthzGrant(gid);
+    });
+    document.getElementById('authzLookupResult')?.addEventListener('click', async (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLElement)) return;
+      const gid = t.getAttribute('data-authz-del-grant');
+      if (!gid) return;
+      const ok = await deleteAuthzGrant(gid);
+      if (ok) await queryAuthzPermissions();
+    });
+
+    document.getElementById('authzLookupSubjectType')?.addEventListener('change', () => {
+      const hidden = document.getElementById('authzLookupSubjectId');
+      if (hidden) hidden.value = '';
+      const search = document.getElementById('authzLookupSubjectSearch');
+      if (search) search.value = '';
+      refreshAuthzLookupSubjectPicker('');
+      resetAuthzLookupResult();
+    });
+    document.getElementById('authzLookupSubjectTrigger')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const panel = document.getElementById('authzLookupSubjectPanel');
+      const open = panel && !panel.hidden;
+      closeAllAuthzPickers();
+      if (panel) panel.hidden = open;
+      if (!open) {
+        refreshAuthzLookupSubjectPicker(document.getElementById('authzLookupSubjectSearch')?.value || '');
+        document.getElementById('authzLookupSubjectSearch')?.focus();
+      }
+    });
+    document.getElementById('authzLookupSubjectSearch')?.addEventListener('input', (e) => {
+      refreshAuthzLookupSubjectPicker(e.target.value || '');
+    });
+    document.getElementById('authzLookupSubjectPanel')?.addEventListener('click', (e) => e.stopPropagation());
+    document.getElementById('authzLookupSubmitBtn')?.addEventListener('click', queryAuthzPermissions);
+    document.getElementById('authzLookupResetBtn')?.addEventListener('click', clearAuthzLookupForm);
+
+    document.getElementById('closeAuthzGroupModal')?.addEventListener('click', closeAuthzGroupModal);
+    document.getElementById('cancelAuthzGroupModal')?.addEventListener('click', closeAuthzGroupModal);
+    document.getElementById('saveAuthzGroupBtn')?.addEventListener('click', saveAuthzGroupModal);
+    document.getElementById('authzGroupMemberSearch')?.addEventListener('input', (e) => {
+      renderAuthzMemberChecklist(e.target.value || '');
+    });
+    document.getElementById('authzGroupModal')?.addEventListener('click', (event) => {
+      if (event.target === event.currentTarget) closeAuthzGroupModal();
+    });
+  }
+
+  function initAuthzPanel() {
+    if (!isPlatformAdmin()) {
+      showAppToast('仅管理员可进入授权管理', 'warn');
+      switchToPanel('permission');
+      return;
+    }
+    bindAuthzPanelEvents();
+    const activeTab = document.querySelector('#panel-authz [data-authz-tab].active')?.dataset.authzTab || 'groups';
+    loadAuthzOptions().then(() => {
+      if (activeTab === 'grants') return;
+      if (activeTab === 'lookup') {
+        refreshAuthzLookupSubjectPicker(document.getElementById('authzLookupSubjectSearch')?.value || '');
+        return loadAuthzGrants();
+      }
+      return loadAuthzGroups();
+    }).catch((error) => showAppToast(error.message || '加载授权数据失败', 'error'));
+  }
+
   function initPermissionPanel() {
     syncPlatformRoleUi();
     const activeTab = document.querySelector('#panel-permission .perm-tab.active')?.dataset.permTab || 'approval';
     if (activeTab === 'approval') loadApprovalList();
-    if (activeTab === 'users' && isPlatformAdmin()) loadUserManageList();
+    if (activeTab === 'users') initUsersPanel();
     if (activeTab === 'audit') renderApprovalAuditList();
+  }
+
+  function openPermissionUsersTab() {
+    switchToPanel('permission');
+    const btn = document.querySelector('#panel-permission [data-perm-tab="users"]');
+    if (btn instanceof HTMLElement) btn.click();
+    else initUsersPanel();
+  }
+
+  function refreshAccountProfileCard() {
+    const usernameEl = document.getElementById('accountUsername');
+    const roleEl = document.getElementById('accountUserRole');
+    const username = currentAuthUser?.username || currentAuthUser?.display_name || '-';
+    const roleRaw = (currentAuthUser?.role || '').toString().trim().toLowerCase();
+    const roleLabel = roleRaw === 'admin' ? '管理员' : (roleRaw ? '普通用户' : '-');
+    if (usernameEl) usernameEl.textContent = username;
+    if (roleEl) roleEl.textContent = roleLabel;
+  }
+
+  async function submitAccountPasswordChange() {
+    const currentPassword = document.getElementById('accountPasswordCurrent')?.value || '';
+    const newPassword = document.getElementById('accountPasswordNew')?.value || '';
+    const confirm = document.getElementById('accountPasswordConfirm')?.value || '';
+    const err = document.getElementById('accountPasswordError');
+    const btn = document.getElementById('accountPasswordSubmitBtn');
+    if (!currentPassword || !newPassword) {
+      if (err) { err.hidden = false; err.textContent = '请填写当前密码和新密码'; }
+      return;
+    }
+    if (newPassword.length < 6) {
+      if (err) { err.hidden = false; err.textContent = '新密码至少 6 位'; }
+      return;
+    }
+    if (newPassword !== confirm) {
+      if (err) { err.hidden = false; err.textContent = '两次输入的新密码不一致'; }
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders(),
+        },
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(formatAuthError(data.detail, data.error || '修改密码失败'));
+      }
+      const me = await refreshAuthUser();
+      currentAuthUser = me || data.user || currentAuthUser;
+      if (currentAuthUser) currentAuthUser.must_change_password = false;
+      ['accountPasswordCurrent', 'accountPasswordNew', 'accountPasswordConfirm'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
+      if (err) { err.hidden = true; err.textContent = ''; }
+      refreshAccountProfileCard();
+      syncPlatformRoleUi();
+      showAppToast('密码已更新', 'ok');
+    } catch (error) {
+      if (err) {
+        err.hidden = false;
+        err.textContent = error.message || '修改密码失败';
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '修改密码'; }
+    }
+  }
+
+  function initUsersPanel() {
+    syncPlatformRoleUi();
+    refreshAccountProfileCard();
+    const adminSection = document.getElementById('usersAdminSection');
+    if (adminSection) adminSection.hidden = !isPlatformAdmin();
+    if (isPlatformAdmin()) loadUserManageList();
   }
 
   // ===== Pipelines (A/B → C → D) =====
@@ -6490,8 +8219,19 @@ export function initApp() {
   });
   setAuthMode('login');
   refreshRegisterAvailability();
-  document.getElementById('logoutBtn')?.addEventListener('click', logoutCurrentUser);
+  document.getElementById('changePasswordSubmitBtn')?.addEventListener('click', submitChangePassword);
+  document.getElementById('changePasswordConfirm')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitChangePassword();
+  });
+  document.getElementById('changePasswordNew')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('changePasswordConfirm')?.focus();
+  });
   document.getElementById('settingsLogoutBtn')?.addEventListener('click', logoutCurrentUser);
+  document.getElementById('refreshUsersBtn')?.addEventListener('click', () => loadUserManageList());
+  document.getElementById('accountPasswordSubmitBtn')?.addEventListener('click', submitAccountPasswordChange);
+  document.getElementById('accountPasswordConfirm')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitAccountPasswordChange();
+  });
   document.getElementById('addUserBtn')?.addEventListener('click', () => openUserModal());
   document.getElementById('closeAddUser')?.addEventListener('click', closeUserModal);
   document.getElementById('cancelAddUser')?.addEventListener('click', closeUserModal);
@@ -6554,6 +8294,10 @@ export function initApp() {
     if (!ok) return;
     loadKnowledgeBases();
     loadDataSourcesFromApi();
+    loadPlatformModels().then(() => {
+      renderModelList();
+      updateCurrentModelLabel();
+    });
   });
   autoResize();
   queryInput?.focus();
@@ -6577,6 +8321,14 @@ export function initApp() {
     get initToolPanel() { return typeof initToolPanel === 'function' ? initToolPanel : null; },
     get loadPipelines() { return typeof loadPipelines === 'function' ? loadPipelines : null; },
     get initPermissionPanel() { return typeof initPermissionPanel === 'function' ? initPermissionPanel : null; },
+    get initUsersPanel() { return typeof initUsersPanel === 'function' ? initUsersPanel : null; },
+    get initAuthzPanel() { return typeof initAuthzPanel === 'function' ? initAuthzPanel : null; },
+    get initGatewayAdminPanel() { return typeof initGatewayAdminPanel === 'function' ? initGatewayAdminPanel : null; },
+    get initGatewayUsagePanel() { return typeof initGatewayUsagePanel === 'function' ? initGatewayUsagePanel : null; },
+    openPermissionUsersTab,
+    isPlatformAdmin,
+    hasCapability,
+    getUserCapabilities,
   };
 }
 

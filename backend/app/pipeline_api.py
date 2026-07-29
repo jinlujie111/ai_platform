@@ -7,7 +7,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .database import SessionLocal, get_db
-from .deps_auth import require_admin
+from .access_control import assert_owner, owned_query
+from .deps_auth import require_admin, require_usable_user
 from .models import Pipeline, PipelineRun, PipelineStep, User
 from .pipeline_schemas import (
     PipelineCreate,
@@ -25,11 +26,17 @@ try:
 except ImportError:
     from services.scheduler import get_scheduler_status
 
-router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
+router = APIRouter(
+    prefix="/api/pipelines",
+    tags=["pipelines"],
+    dependencies=[Depends(require_usable_user)],
+)
 
 
 @router.get("/scheduler/status")
-def scheduler_status():
+def scheduler_status(
+    user: User = Depends(require_usable_user),
+):
     """Inspect in-process cron scheduler."""
     return get_scheduler_status()
 
@@ -106,7 +113,7 @@ def _run_out(run: PipelineRun, pipeline_name: str = "") -> PipelineRunOut:
     )
 
 
-def _get_pipeline(db: Session, pipeline_id: int) -> Pipeline:
+def _get_pipeline(db: Session, pipeline_id: int, user: User) -> Pipeline:
     value = db.scalars(
         select(Pipeline)
         .where(Pipeline.id == pipeline_id)
@@ -114,6 +121,7 @@ def _get_pipeline(db: Session, pipeline_id: int) -> Pipeline:
     ).first()
     if not value:
         raise HTTPException(status_code=404, detail="流水线不存在")
+    assert_owner(value, user, not_found_detail="流水线不存在")
     return value
 
 
@@ -155,8 +163,10 @@ def _last_run(db: Session, pipeline_id: int) -> PipelineRun | None:
 def list_pipelines(
     status: str | None = Query(default=None),
     db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
 ):
     stmt = select(Pipeline).options(selectinload(Pipeline.steps)).order_by(Pipeline.updated_at.desc())
+    stmt = owned_query(stmt, Pipeline, user)
     if status:
         stmt = stmt.where(Pipeline.status == status)
     pipelines = db.scalars(stmt).all()
@@ -164,8 +174,13 @@ def list_pipelines(
 
 
 @router.post("", response_model=PipelineOut, status_code=201)
-def create_pipeline(payload: PipelineCreate, db: Session = Depends(get_db)):
+def create_pipeline(
+    payload: PipelineCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
     pipeline = Pipeline(
+        owner_id=user.id,
         name=payload.name.strip(),
         description=payload.description or "",
         status=payload.status or "draft",
@@ -184,7 +199,7 @@ def create_pipeline(payload: PipelineCreate, db: Session = Depends(get_db)):
     if payload.steps:
         _replace_steps(db, pipeline, payload.steps)
         db.commit()
-    pipeline = _get_pipeline(db, pipeline.id)
+    pipeline = _get_pipeline(db, pipeline.id, user)
     return _pipeline_out(pipeline)
 
 
@@ -194,6 +209,8 @@ def list_runs(
     status: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
+
+    user: User = Depends(require_usable_user),
 ):
     stmt = select(PipelineRun).options(selectinload(PipelineRun.step_runs)).order_by(PipelineRun.id.desc())
     if pipeline_id is not None:
@@ -212,7 +229,11 @@ def list_runs(
 
 
 @router.get("/runs/{run_id}", response_model=PipelineRunOut)
-def get_run(run_id: int, db: Session = Depends(get_db)):
+def get_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
     run = db.scalars(
         select(PipelineRun)
         .where(PipelineRun.id == run_id)
@@ -220,7 +241,7 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
     ).first()
     if not run:
         raise HTTPException(status_code=404, detail="运行记录不存在")
-    pipe = db.get(Pipeline, run.pipeline_id)
+    pipe = _get_pipeline(db, run.pipeline_id, user)
     return _run_out(run, pipe.name if pipe else "")
 
 
@@ -228,6 +249,8 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
 def create_abcd_template(
     name: str = Query(default="A+B→C→D 示例流水线"),
     db: Session = Depends(get_db),
+
+    user: User = Depends(require_usable_user),
 ):
     """Create a 4-step starter pipeline for A/B extract → C transform → D load."""
     payload = PipelineCreate(
@@ -269,18 +292,22 @@ def create_abcd_template(
             ),
         ],
     )
-    return create_pipeline(payload, db)
+    return create_pipeline(payload, db, user)
 
 
 @router.get("/{pipeline_id}", response_model=PipelineOut)
-def get_pipeline(pipeline_id: int, db: Session = Depends(get_db)):
-    pipeline = _get_pipeline(db, pipeline_id)
+def get_pipeline(pipeline_id: int, db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
+    pipeline = _get_pipeline(db, pipeline_id, user)
     return _pipeline_out(pipeline, _last_run(db, pipeline.id))
 
 
 @router.put("/{pipeline_id}", response_model=PipelineOut)
-def update_pipeline(pipeline_id: int, payload: PipelineUpdate, db: Session = Depends(get_db)):
-    pipeline = _get_pipeline(db, pipeline_id)
+def update_pipeline(pipeline_id: int, payload: PipelineUpdate, db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
+    pipeline = _get_pipeline(db, pipeline_id, user)
     data = _dump(payload, exclude_unset=True)
     steps = data.pop("steps", None)
     if "schedule_enabled" in data:
@@ -302,13 +329,15 @@ def update_pipeline(pipeline_id: int, payload: PipelineUpdate, db: Session = Dep
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="流水线名称已存在")
-    pipeline = _get_pipeline(db, pipeline_id)
+    pipeline = _get_pipeline(db, pipeline_id, user)
     return _pipeline_out(pipeline, _last_run(db, pipeline.id))
 
 
 @router.delete("/{pipeline_id}", status_code=204)
-def delete_pipeline(pipeline_id: int, db: Session = Depends(get_db)):
-    pipeline = _get_pipeline(db, pipeline_id)
+def delete_pipeline(pipeline_id: int, db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
+    pipeline = _get_pipeline(db, pipeline_id, user)
     db.delete(pipeline)
     db.commit()
     return None
@@ -328,8 +357,10 @@ def trigger_pipeline(
     background_tasks: BackgroundTasks,
     sync: bool = Query(default=True),
     db: Session = Depends(get_db),
+
+    user: User = Depends(require_usable_user),
 ):
-    pipeline = _get_pipeline(db, pipeline_id)
+    pipeline = _get_pipeline(db, pipeline_id, user)
     if sync:
         try:
             run = run_pipeline(db, pipeline.id, trigger="manual")
@@ -363,9 +394,9 @@ def trigger_pipeline(
 def approve_pipeline(
     pipeline_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_admin),
 ):
-    pipeline = _get_pipeline(db, pipeline_id)
+    pipeline = _get_pipeline(db, pipeline_id, user)
     status = (pipeline.status or "").strip().lower()
     if status not in ("pending_approval", "pending", "rejected", "draft"):
         raise HTTPException(
@@ -378,7 +409,7 @@ def approve_pipeline(
         pipeline.schedule_note = (note + ";approved=1").strip(";")
     db.add(pipeline)
     db.commit()
-    pipeline = _get_pipeline(db, pipeline_id)
+    pipeline = _get_pipeline(db, pipeline_id, user)
     return _pipeline_out(pipeline, _last_run(db, pipeline.id))
 
 
@@ -387,9 +418,9 @@ def reject_pipeline(
     pipeline_id: int,
     reason: str = Query(default=""),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_admin),
 ):
-    pipeline = _get_pipeline(db, pipeline_id)
+    pipeline = _get_pipeline(db, pipeline_id, user)
     status = (pipeline.status or "").strip().lower()
     if status not in ("pending_approval", "pending", "active", "draft"):
         raise HTTPException(
@@ -405,5 +436,5 @@ def reject_pipeline(
         pipeline.description = (desc + f"\n[驳回原因] {reason.strip()}").strip()
     db.add(pipeline)
     db.commit()
-    pipeline = _get_pipeline(db, pipeline_id)
+    pipeline = _get_pipeline(db, pipeline_id, user)
     return _pipeline_out(pipeline, _last_run(db, pipeline.id))

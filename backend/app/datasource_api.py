@@ -6,8 +6,16 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .access_control import (
+    RESOURCE_DS,
+    accessible_query,
+    assert_can_manage,
+    assert_can_use,
+)
 from .database import get_db
-from .models import DataSource
+from .deps_auth import require_usable_user
+from .models import DataSource, User
+from .services.secret_box import encrypt_secret
 from .schemas import (
     DataSourceCreate,
     DataSourceOut,
@@ -17,7 +25,11 @@ from .schemas import (
 )
 from .services import datasource as ds_service
 
-router = APIRouter(prefix="/api/datasources", tags=["datasources"])
+router = APIRouter(
+    prefix="/api/datasources",
+    tags=["datasources"],
+    dependencies=[Depends(require_usable_user)],
+)
 
 
 def _dump(model, **kwargs):
@@ -26,10 +38,22 @@ def _dump(model, **kwargs):
     return model.dict(**kwargs)
 
 
-def _get_ds(db: Session, datasource_id: int) -> DataSource:
+def _get_ds(
+    db: Session,
+    datasource_id: int,
+    user: User,
+    *,
+    manage: bool = False,
+) -> DataSource:
     value = db.get(DataSource, datasource_id)
     if not value:
         raise HTTPException(status_code=404, detail="数据源不存在")
+    if manage:
+        assert_can_manage(value, user, not_found_detail="数据源不存在")
+    else:
+        assert_can_use(
+            db, value, user, resource_type=RESOURCE_DS, not_found_detail="数据源不存在"
+        )
     return value
 
 
@@ -65,15 +89,32 @@ def _apply_status(db: Session, ds: DataSource, *, ok: bool, error: str = "") -> 
 
 
 @router.get("", response_model=list[DataSourceOut])
-def list_datasources(db: Session = Depends(get_db)):
-    values = db.scalars(select(DataSource).order_by(DataSource.updated_at.desc())).all()
+def list_datasources(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
+    stmt = accessible_query(
+        select(DataSource).order_by(DataSource.updated_at.desc()),
+        DataSource,
+        user,
+        db,
+        resource_type=RESOURCE_DS,
+    )
+    values = db.scalars(stmt).all()
     return [_out(value) for value in values]
 
 
 @router.post("", response_model=DataSourceOut, status_code=201)
-def create_datasource(payload: DataSourceCreate, db: Session = Depends(get_db)):
+def create_datasource(
+    payload: DataSourceCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
     data = _dump(payload)
     data["query_only"] = _as_flag(data.get("query_only", True))
+    data["owner_id"] = user.id
+    if data.get("password"):
+        data["password"] = encrypt_secret(data["password"])
     value = DataSource(**data)
     db.add(value)
     try:
@@ -87,12 +128,16 @@ def create_datasource(payload: DataSourceCreate, db: Session = Depends(get_db)):
 
 @router.put("/{datasource_id}", response_model=DataSourceOut)
 def update_datasource(
-    datasource_id: int, payload: DataSourceUpdate, db: Session = Depends(get_db)
+    datasource_id: int, payload: DataSourceUpdate, db: Session = Depends(get_db),
+
+    user: User = Depends(require_usable_user),
 ):
-    value = _get_ds(db, datasource_id)
+    value = _get_ds(db, datasource_id, user, manage=True)
     data = _dump(payload, exclude_unset=True)
     if "password" in data and data["password"] == "":
         data.pop("password")
+    elif "password" in data and data.get("password"):
+        data["password"] = encrypt_secret(data["password"])
     if "query_only" in data:
         data["query_only"] = _as_flag(data.get("query_only"))
     for key, item in data.items():
@@ -107,15 +152,19 @@ def update_datasource(
 
 
 @router.delete("/{datasource_id}", status_code=204)
-def delete_datasource(datasource_id: int, db: Session = Depends(get_db)):
-    value = _get_ds(db, datasource_id)
+def delete_datasource(datasource_id: int, db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
+    value = _get_ds(db, datasource_id, user, manage=True)
     db.delete(value)
     db.commit()
     return None
 
 
 @router.post("/test")
-def test_datasource_payload(payload: DataSourceTestRequest):
+def test_datasource_payload(payload: DataSourceTestRequest,
+    user: User = Depends(require_usable_user),
+):
     temp = DataSource(
         name="__test__",
         type=payload.type,
@@ -133,8 +182,10 @@ def test_datasource_payload(payload: DataSourceTestRequest):
 
 
 @router.post("/{datasource_id}/test")
-def test_datasource(datasource_id: int, db: Session = Depends(get_db)):
-    value = _get_ds(db, datasource_id)
+def test_datasource(datasource_id: int, db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
+    value = _get_ds(db, datasource_id, user)
     try:
         result = ds_service.test_connection(value)
         _apply_status(db, value, ok=True)
@@ -146,9 +197,11 @@ def test_datasource(datasource_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{datasource_id}/query")
 def query_datasource(
-    datasource_id: int, payload: DataSourceQueryRequest, db: Session = Depends(get_db)
+    datasource_id: int, payload: DataSourceQueryRequest, db: Session = Depends(get_db),
+
+    user: User = Depends(require_usable_user),
 ):
-    value = _get_ds(db, datasource_id)
+    value = _get_ds(db, datasource_id, user)
     try:
         result = ds_service.run_readonly_query(value, payload.sql, max_rows=payload.max_rows)
         _apply_status(db, value, ok=True)
@@ -159,8 +212,10 @@ def query_datasource(
 
 
 @router.get("/{datasource_id}/tables")
-def datasource_tables(datasource_id: int, db: Session = Depends(get_db)):
-    value = _get_ds(db, datasource_id)
+def datasource_tables(datasource_id: int, db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
+    value = _get_ds(db, datasource_id, user)
     try:
         result = ds_service.list_tables(value)
         _apply_status(db, value, ok=True)

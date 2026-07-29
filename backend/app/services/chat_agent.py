@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from ..llm import SYSTEM_PROMPT, call_openai_compatible_messages
+from ..llm import SYSTEM_PROMPT
 from ..models import DataSource, KnowledgeBase, Pipeline, PipelineRun, PipelineStep, utcnow
 from . import datasource as ds_service
 from .knowledge import retrieve
@@ -1027,11 +1027,17 @@ async def run_tool_chat(
     mcp_servers: list[McpToolRef] | None = None,
     allow_pipeline: bool = False,
     allow_mcp: bool = False,
+    user_id: int | None = None,
+    request_id: str = "",
+    is_admin: bool = False,
+    use_gateway: bool = False,
 ) -> tuple[str, list[dict[str, Any]]]:
     """OpenAI-compatible tool loop. Returns (answer, tool_traces)."""
     knowledge_refs = knowledge_refs or []
     mcp_servers = mcp_servers or []
     provider_key = (provider or "custom").lower().strip()
+    if use_gateway:
+        provider_key = "gateway"
 
     runtime = ToolRuntime(
         db=db,
@@ -1042,24 +1048,69 @@ async def run_tool_chat(
         allow_mcp=allow_mcp,
     )
 
-    if provider_key in ("anthropic", "google"):
-        from ..llm import call_llm
+    async def _llm_messages(**kwargs):
+        if db is not None:
+            from ..gateway.service import chat_messages_raw
 
+            return await chat_messages_raw(
+                db,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                user_id=user_id,
+                source="agent",
+                request_id=request_id,
+                is_admin=is_admin,
+                use_gateway=use_gateway,
+                **kwargs,
+            )
+        from ..llm import call_openai_compatible_messages
+
+        return await call_openai_compatible_messages(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            **kwargs,
+        )
+
+    if provider_key in ("anthropic", "google"):
         hint_parts = [
             "\n\n## 能力说明\n当前模型提供方暂未接入工具调用，请基于上下文作答，不要声称已执行查询/流水线。"
         ]
         ds_hint = build_datasource_context(datasources)
         if ds_hint:
             hint_parts.append(ds_hint)
-        answer = await call_llm(
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-            message=message,
-            history=history,
-            system_context=(system_context + "\n\n".join(hint_parts)).strip(),
-        )
+        if db is not None:
+            from ..gateway.service import chat_text as gateway_chat_text
+
+            answer = await gateway_chat_text(
+                db,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                message=message,
+                history=history,
+                system_context=(system_context + "\n\n".join(hint_parts)).strip(),
+                user_id=user_id,
+                source="agent",
+                request_id=request_id,
+                is_admin=is_admin,
+                use_gateway=use_gateway,
+            )
+        else:
+            from ..llm import call_llm
+
+            answer = await call_llm(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                message=message,
+                history=history,
+                system_context=(system_context + "\n\n".join(hint_parts)).strip(),
+            )
         return answer, []
 
     active_tools = filter_builtin_tools(
@@ -1076,20 +1127,39 @@ async def run_tool_chat(
         runtime.mcp_tool_meta = mcp_meta
 
     if not active_tools:
-        from ..llm import call_llm
-
         hint = "\n\n## 工具说明\n当前没有可用工具，请仅根据上下文作答。"
         if mcp_errors:
             hint += "\nMCP 加载失败：" + "；".join(mcp_errors)
-        answer = await call_llm(
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-            message=message,
-            history=history,
-            system_context=(system_context + hint).strip(),
-        )
+        if db is not None:
+            from ..gateway.service import chat_text as gateway_chat_text
+
+            answer = await gateway_chat_text(
+                db,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                message=message,
+                history=history,
+                system_context=(system_context + hint).strip(),
+                user_id=user_id,
+                source="agent",
+                request_id=request_id,
+                is_admin=is_admin,
+                use_gateway=use_gateway,
+            )
+        else:
+            from ..llm import call_llm
+
+            answer = await call_llm(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                message=message,
+                history=history,
+                system_context=(system_context + hint).strip(),
+            )
         return answer, []
 
     rounds = max(1, min(10, int(max_rounds or MAX_TOOL_ROUNDS)))
@@ -1141,10 +1211,7 @@ async def run_tool_chat(
 
     traces: list[dict[str, Any]] = []
     for _ in range(rounds):
-        data = await call_openai_compatible_messages(
-            base_url=base_url,
-            api_key=api_key,
-            model=model,
+        data = await _llm_messages(
             messages=messages,
             tools=active_tools,
             tool_choice="auto",
@@ -1196,10 +1263,7 @@ async def run_tool_chat(
             return content, traces
         break
 
-    data = await call_openai_compatible_messages(
-        base_url=base_url,
-        api_key=api_key,
-        model=model,
+    data = await _llm_messages(
         messages=messages
         + [
             {

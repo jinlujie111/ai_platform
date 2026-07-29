@@ -10,8 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from .deps_auth import get_current_user
+from .deps_auth import require_usable_user
 from .models import User, UserWorkspaceSetting
+from .services.workspace_secrets import protect_workspace_settings, reveal_workspace_settings
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
 
@@ -69,7 +70,7 @@ def _load_settings(db: Session, user_id: int) -> dict:
     out: dict = {}
     for row in rows:
         out[row.setting_key] = _decode_value(row.setting_value)
-    return out
+    return reveal_workspace_settings(out)
 
 
 def _upsert_settings(db: Session, user_id: int, settings: dict) -> dict:
@@ -80,7 +81,8 @@ def _upsert_settings(db: Session, user_id: int, settings: dict) -> dict:
         ).all()
     }
     now = _utcnow()
-    for key, value in (settings or {}).items():
+    protected = protect_workspace_settings(settings or {})
+    for key, value in protected.items():
         key = str(key or "").strip()
         if not key or key not in WORKSPACE_KEYS:
             continue
@@ -105,7 +107,7 @@ def _upsert_settings(db: Session, user_id: int, settings: dict) -> dict:
 
 @router.get("")
 def get_workspace(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_usable_user),
     db: Session = Depends(get_db),
 ):
     settings = _load_settings(db, user.id)
@@ -120,7 +122,7 @@ def get_workspace(
 @router.put("")
 def put_workspace(
     payload: WorkspacePutRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_usable_user),
     db: Session = Depends(get_db),
 ):
     """Replace/upsert provided keys (partial update is OK)."""
@@ -130,7 +132,7 @@ def put_workspace(
 
 @router.delete("")
 def clear_workspace(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_usable_user),
     db: Session = Depends(get_db),
 ):
     rows = db.scalars(

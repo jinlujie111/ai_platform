@@ -46,32 +46,20 @@
         <h1 class="chat-title" id="currentReportTitle">新建会话</h1>
         <div class="chat-header-tools">
           <div class="chat-kb-picker" id="chatAgentPicker">
-            <button type="button" class="chat-kb-picker-btn" id="chatAgentPickerBtn" title="选择 Agent 配置">自由配置</button>
+            <button type="button" class="chat-kb-picker-btn" id="chatAgentPickerBtn" title="选择 Agent">加载中...</button>
             <div class="chat-kb-picker-menu" id="chatAgentPickerMenu" hidden>
-              <label class="chat-kb-picker-item chat-kb-picker-none">
-                <input type="radio" name="chatAgentPick" id="chatAgentNone" value="" checked>
-                <span>自由配置（手动选模型 / 知识库）</span>
-              </label>
               <div class="chat-kb-picker-list" id="chatAgentPickerList"></div>
             </div>
           </div>
           <div class="chat-kb-picker" id="chatKbPicker">
-            <button type="button" class="chat-kb-picker-btn" id="chatKbPickerBtn" title="可多选知识库">不使用知识库</button>
+            <button type="button" class="chat-kb-picker-btn" id="chatKbPickerBtn" title="按权限可选知识库">加载中...</button>
             <div class="chat-kb-picker-menu" id="chatKbPickerMenu" hidden>
-              <label class="chat-kb-picker-item chat-kb-picker-none">
-                <input type="checkbox" id="chatKbNone" checked>
-                <span>不使用知识库</span>
-              </label>
               <div class="chat-kb-picker-list" id="chatKbPickerList"></div>
             </div>
           </div>
           <div class="chat-kb-picker" id="chatDsPicker">
-            <button type="button" class="chat-kb-picker-btn" id="chatDsPickerBtn" title="可多选数据源">不使用数据源</button>
+            <button type="button" class="chat-kb-picker-btn" id="chatDsPickerBtn" title="按权限可选数据源">加载中...</button>
             <div class="chat-kb-picker-menu" id="chatDsPickerMenu" hidden>
-              <label class="chat-kb-picker-item chat-kb-picker-none">
-                <input type="checkbox" id="chatDsNone" checked>
-                <span>不使用数据源</span>
-              </label>
               <div class="chat-kb-picker-list" id="chatDsPickerList"></div>
             </div>
           </div>
@@ -158,12 +146,140 @@
 
         <!-- ========== 模型配置面板 ========== -->
         <div class="modal-panel active" id="panel-model">
-          <div class="panel-desc">配置 AI 大模型，设置 API Key 并测试连接。</div>
+          <div class="panel-desc">上方可选用管理员配置的平台模型（无需 Key）；也可自行添加个人模型。调用统一经 AI Gateway。</div>
           <div class="model-list" id="modelList"></div>
           <button class="btn-add-model" id="addModelBtn">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             添加自定义模型
           </button>
+        </div>
+
+
+        <!-- ========== Gateway 管理（仅管理员） ========== -->
+        <div class="modal-panel" id="panel-gateway" data-admin-only="1" hidden>
+          <div class="panel-desc">管理员配置平台逻辑模型、厂商密钥与 Gateway 路由策略。普通用户无此权限，聊天仍可使用自己的「模型配置」。</div>
+
+          <nav class="perm-tabs" aria-label="Gateway 管理">
+            <button class="perm-tab active" data-gateway-tab="models" type="button">逻辑模型</button>
+            <button class="perm-tab" data-gateway-tab="routes" type="button">路由策略</button>
+            <button class="perm-tab" data-gateway-tab="providers" type="button">厂商密钥</button>
+          </nav>
+
+          <div class="kb-tab-content active" id="gateway-tab-models">
+            <div class="perm-panel-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>逻辑模型</h3>
+                  <p>平台级 model_id → 上游模型；用户侧可只认逻辑名或路由名。</p>
+                </div>
+                <div class="perm-toolbar">
+                  <button class="btn-secondary" id="gatewayAdminRefreshModelsBtn" type="button">刷新</button>
+                </div>
+              </div>
+              <div class="authz-grant-form" style="margin-bottom:12px">
+                <div class="authz-grant-form__row">
+                  <div class="form-group">
+                    <label class="form-label" for="gwModelId">逻辑 ID</label>
+                    <input class="form-input" id="gwModelId" placeholder="deepseek-chat">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="gwModelDisplay">显示名</label>
+                    <input class="form-input" id="gwModelDisplay" placeholder="DeepSeek Chat">
+                  </div>
+                </div>
+                <div class="authz-grant-form__row">
+                  <div class="form-group">
+                    <label class="form-label" for="gwModelProvider">厂商</label>
+                    <select class="form-select" id="gwModelProvider"></select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="gwModelUpstream">上游模型名</label>
+                    <input class="form-input" id="gwModelUpstream" placeholder="deepseek-chat">
+                  </div>
+                </div>
+                <div class="authz-grant-form__actions">
+                  <button class="btn-primary" id="gwModelCreateBtn" type="button">新增逻辑模型</button>
+                </div>
+              </div>
+              <div id="gatewayAdminModelsList" class="authz-perm-list">
+                <div class="doc-empty-hint">加载中…</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="kb-tab-content" id="gateway-tab-routes" hidden>
+            <div class="perm-panel-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>路由策略</h3>
+                  <p>如 cheap / quality / default：按顺序尝试逻辑模型（失败可 fallback）。</p>
+                </div>
+                <button class="btn-secondary" id="gatewayAdminRefreshRoutesBtn" type="button">刷新</button>
+              </div>
+              <div class="authz-grant-form" style="margin-bottom:12px">
+                <div class="authz-grant-form__row">
+                  <div class="form-group">
+                    <label class="form-label" for="gwRouteName">策略名</label>
+                    <input class="form-input" id="gwRouteName" placeholder="cheap">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="gwRouteDesc">说明</label>
+                    <input class="form-input" id="gwRouteDesc" placeholder="低成本优先">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="gwRouteModels">逻辑模型列表（逗号分隔，靠前优先）</label>
+                  <input class="form-input" id="gwRouteModels" placeholder="deepseek-chat, qwen-turbo">
+                </div>
+                <div class="authz-grant-form__actions">
+                  <button class="btn-primary" id="gwRouteCreateBtn" type="button">新增 / 覆盖策略</button>
+                </div>
+              </div>
+              <div id="gatewayAdminRoutesList" class="authz-perm-list">
+                <div class="doc-empty-hint">加载中…</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="kb-tab-content" id="gateway-tab-providers" hidden>
+            <div class="perm-panel-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>厂商密钥</h3>
+                  <p>服务端加密存储；配置后逻辑模型 / 路由即可不依赖用户个人 Key。</p>
+                </div>
+                <button class="btn-secondary" id="gatewayAdminRefreshProvidersBtn" type="button">刷新</button>
+              </div>
+              <div id="gatewayAdminProvidersList" class="authz-perm-list">
+                <div class="doc-empty-hint">加载中…</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ========== Gateway 用量 ========== -->
+        <div class="modal-panel" id="panel-gateway-usage">
+          <div class="panel-desc">查看 AI Gateway 调用用量与估算费用（按模型 / 用户 / 来源聚合）。</div>
+          <div class="perm-panel-card">
+            <div class="perm-panel-head">
+              <div>
+                <h3>用量统计</h3>
+                <p>数据来自 usage_ledger；普通用户仅看本人，管理员可看全站。</p>
+              </div>
+              <div class="perm-toolbar">
+                <select class="form-select" id="gatewayUsageGroupBy" style="min-width:120px">
+                  <option value="model">按模型</option>
+                  <option value="user">按用户</option>
+                  <option value="source">按来源</option>
+                  <option value="day">按日</option>
+                </select>
+                <button class="btn-secondary" id="gatewayUsageRefreshBtn" type="button">刷新</button>
+              </div>
+            </div>
+            <div id="gatewayUsageList" class="authz-perm-list">
+              <div class="doc-empty-hint">加载中…</div>
+            </div>
+          </div>
         </div>
 
         <!-- ========== 数据源接入面板 ========== -->
@@ -664,7 +780,6 @@
             </div>
             <div class="perm-identity-actions">
               <span class="perm-role-badge" id="permRoleBadge">-</span>
-              <button type="button" class="btn-secondary" id="logoutBtn">退出登录</button>
             </div>
           </section>
 
@@ -717,20 +832,58 @@
 
           <!-- ========== 用户管理 ========== -->
           <div class="kb-tab-content" id="perm-tab-users">
-            <div class="perm-panel-card">
-              <div class="perm-panel-head">
-                <div>
-                  <h3>用户管理</h3>
-                  <p>创建管理员或普通用户；普通用户不可审批流水线。</p>
-                </div>
-                <div class="perm-toolbar">
-                  <button class="btn-primary" id="addUserBtn" type="button">新建用户</button>
-                </div>
-              </div>
-              <div id="userManageList" class="skill-list">
-                <div class="doc-empty-hint">加载中...</div>
+            <div class="panel-desc" style="margin-bottom:14px;">查看当前账号、修改登录密码；管理员还可创建与管理全部用户。</div>
+
+          <div class="perm-panel-card">
+            <div class="perm-panel-head">
+              <div>
+                <h3>我的账号</h3>
+                <p>修改当前登录用户的密码。</p>
               </div>
             </div>
+            <div class="change-password-user" style="margin-bottom:12px;">
+              <div class="form-group">
+                <label class="form-label">用户名</label>
+                <div class="form-input form-input--readonly" id="accountUsername">-</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">用户类型</label>
+                <div class="form-input form-input--readonly" id="accountUserRole">-</div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="accountPasswordCurrent">当前密码</label>
+              <input class="form-input" id="accountPasswordCurrent" type="password" autocomplete="current-password" placeholder="请输入当前密码">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="accountPasswordNew">新密码</label>
+              <input class="form-input" id="accountPasswordNew" type="password" autocomplete="new-password" placeholder="至少 6 位，勿用弱口令" maxlength="128">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="accountPasswordConfirm">确认新密码</label>
+              <input class="form-input" id="accountPasswordConfirm" type="password" autocomplete="new-password" placeholder="再次输入新密码" maxlength="128">
+            </div>
+            <div class="inline-status error" id="accountPasswordError" hidden></div>
+            <div class="perm-toolbar" style="margin-top:8px;">
+              <button class="btn-primary" id="accountPasswordSubmitBtn" type="button">修改密码</button>
+            </div>
+          </div>
+
+          <div class="perm-panel-card" id="usersAdminSection" hidden>
+            <div class="perm-panel-head">
+              <div>
+                <h3>系统用户</h3>
+                <p>创建管理员或普通用户；可为用户设置/重置密码。</p>
+              </div>
+              <div class="perm-toolbar">
+                <button class="btn-secondary" id="refreshUsersBtn" type="button">刷新</button>
+                <button class="btn-primary" id="addUserBtn" type="button">新建用户</button>
+              </div>
+            </div>
+            <div id="userManageList" class="skill-list">
+              <div class="doc-empty-hint">加载中...</div>
+            </div>
+          </div>
           </div>
 
           <!-- ========== 租户管理 ========== -->
@@ -817,6 +970,160 @@
         </div>
 
 
+
+        
+
+                <!-- ========== 授权管理（仅管理员） ========== -->
+        <div class="modal-panel" id="panel-authz" data-admin-only="1">
+          <div class="panel-desc">将知识库、数据源授权给用户或用户组。被授权方可使用资源；仅所有者/管理员可修改或删除。</div>
+
+          <nav class="perm-tabs" aria-label="授权模块">
+            <button class="perm-tab active" data-authz-tab="groups" type="button">用户组</button>
+            <button class="perm-tab" data-authz-tab="grants" type="button">资源授权</button>
+            <button class="perm-tab" data-authz-tab="lookup" type="button">权限查询</button>
+          </nav>
+
+          <div class="kb-tab-content active" id="authz-tab-groups">
+            <div class="perm-panel-card authz-groups-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>用户组</h3>
+                  <p>组织成员并统一授权；创建后可在「资源授权」中整组授予知识库或数据源。</p>
+                </div>
+                <div class="perm-toolbar">
+                  <input class="ds-search-input" type="search" id="authzGroupSearchInput" placeholder="搜索组名 / 描述...">
+                  <button class="btn-secondary" id="authzRefreshGroupsBtn" type="button">刷新</button>
+                  <button class="btn-primary" id="authzCreateGroupBtn" type="button">新建用户组</button>
+                </div>
+              </div>
+              <div id="authzGroupList" class="authz-group-grid">
+                <div class="doc-empty-hint">加载中...</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="kb-tab-content" id="authz-tab-grants" hidden>
+            <div class="perm-panel-card authz-grants-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>新建授权</h3>
+                  <p>选择知识库/数据源，或将 Agent / MCP / Skill / Tool 管理能力授权给用户或用户组。</p>
+                </div>
+              </div>
+
+              <div class="authz-grant-form">
+                <div class="authz-grant-form__row">
+                  <div class="form-group authz-grant-form__type">
+                    <label class="form-label" for="authzGrantResourceType">资源 / 能力</label>
+                    <select class="form-select" id="authzGrantResourceType">
+                      <option value="knowledge_base">知识库</option>
+                      <option value="datasource">数据源</option>
+                      <option value="capability_agent">Agent 管理</option>
+                      <option value="capability_mcp">MCP 管理</option>
+                      <option value="capability_skill">Skill 管理</option>
+                      <option value="capability_tool">Tool 设置</option>
+                    </select>
+                  </div>
+                  <div class="form-group authz-grant-form__pick" id="authzGrantResourcePickGroup">
+                    <label class="form-label">选择资源</label>
+                    <div class="search-picker" id="authzResourcePicker">
+                      <input type="hidden" id="authzGrantResourceId" value="">
+                      <button type="button" class="search-picker__trigger is-empty" id="authzGrantResourceTrigger">搜索并选择资源</button>
+                      <div class="search-picker__panel" id="authzGrantResourcePanel" hidden>
+                        <input class="form-input search-picker__search" type="search" id="authzGrantResourceSearch" placeholder="输入名称关键字过滤..." autocomplete="off">
+                        <div class="search-picker__list" id="authzGrantResourceList"></div>
+                      </div>
+                    </div>
+                    <div class="form-help" id="authzGrantCapabilityHint" hidden>能力授权无需选择具体资源，确认后即可开通对应管理面板。</div>
+                  </div>
+                </div>
+
+                <div class="authz-grant-form__row">
+                  <div class="form-group authz-grant-form__type">
+                    <label class="form-label" for="authzGrantGranteeType">授权对象</label>
+                    <select class="form-select" id="authzGrantGranteeType">
+                      <option value="user">用户</option>
+                      <option value="group">用户组</option>
+                    </select>
+                  </div>
+                  <div class="form-group authz-grant-form__pick">
+                    <label class="form-label">选择对象</label>
+                    <div class="search-picker" id="authzGranteePicker">
+                      <input type="hidden" id="authzGrantGranteeId" value="">
+                      <button type="button" class="search-picker__trigger is-empty" id="authzGrantGranteeTrigger">搜索并选择用户 / 组</button>
+                      <div class="search-picker__panel" id="authzGrantGranteePanel" hidden>
+                        <input class="form-input search-picker__search" type="search" id="authzGrantGranteeSearch" placeholder="输入名称 / 用户名过滤..." autocomplete="off">
+                        <div class="search-picker__list" id="authzGrantGranteeList"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="authz-grant-form__actions">
+                  <button class="btn-primary" id="authzGrantSubmitBtn" type="button">确认授权</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="kb-tab-content" id="authz-tab-lookup" hidden>
+            <div class="perm-panel-card authz-lookup-card">
+              <div class="perm-panel-head">
+                <div>
+                  <h3>权限查询</h3>
+                  <p>按用户/用户组查询有效权限，也可浏览并撤销全部已有授权。</p>
+                </div>
+              </div>
+
+              <div class="authz-lookup-form">
+                <div class="authz-grant-form__row">
+                  <div class="form-group authz-grant-form__type">
+                    <label class="form-label" for="authzLookupSubjectType">对象类型</label>
+                    <select class="form-select" id="authzLookupSubjectType">
+                      <option value="user">用户</option>
+                      <option value="group">用户组</option>
+                    </select>
+                  </div>
+                  <div class="form-group authz-grant-form__pick">
+                    <label class="form-label">选择对象</label>
+                    <div class="search-picker" id="authzLookupSubjectPicker">
+                      <input type="hidden" id="authzLookupSubjectId" value="">
+                      <button type="button" class="search-picker__trigger is-empty" id="authzLookupSubjectTrigger">搜索并选择用户 / 组</button>
+                      <div class="search-picker__panel" id="authzLookupSubjectPanel" hidden>
+                        <input class="form-input search-picker__search" type="search" id="authzLookupSubjectSearch" placeholder="输入名称 / 用户名过滤..." autocomplete="off">
+                        <div class="search-picker__list" id="authzLookupSubjectList"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="authz-grant-form__actions">
+                  <button class="btn-secondary" id="authzLookupResetBtn" type="button">清空</button>
+                  <button class="btn-primary" id="authzLookupSubmitBtn" type="button">查询权限</button>
+                </div>
+              </div>
+
+              <div class="authz-lookup-result" id="authzLookupResult">
+                <div class="doc-empty-hint">请选择用户或用户组后点击「查询权限」。</div>
+              </div>
+
+              <div class="authz-grant-list-section">
+                <div class="authz-grant-list-head">
+                  <div>
+                    <h4>已有授权</h4>
+                    <p>平台全部资源授权关系，可搜索与撤销</p>
+                  </div>
+                  <div class="perm-toolbar">
+                    <input class="ds-search-input" type="search" id="authzGrantSearchInput" placeholder="搜索已有授权...">
+                    <button class="btn-secondary" id="authzRefreshGrantsBtn" type="button">刷新</button>
+                  </div>
+                </div>
+                <div id="authzGrantList" class="authz-perm-list">
+                  <div class="doc-empty-hint">加载中...</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <!-- ========== 数据输出面板 ========== -->
         <div class="modal-panel" id="panel-dataoutput">
@@ -1595,7 +1902,7 @@
         <div id="authRegisterPane" hidden>
           <div class="form-group">
             <label class="form-label" for="registerUsername">用户名</label>
-            <input class="form-input" id="registerUsername" autocomplete="username" placeholder="3–64 位字母数字或 _-." maxlength="64">
+            <input class="form-input" id="registerUsername" autocomplete="username" placeholder="中文 / 字母开头，2–64 位" maxlength="64">
           </div>
           <div class="form-group">
             <label class="form-label" for="registerDisplayName">显示名 <span class="form-label-optional">(可选)</span></label>
@@ -1620,6 +1927,81 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="changePasswordOverlay" aria-hidden="true">
+    <div class="app-dialog app-dialog--md modal-add-model login-dialog" role="dialog" aria-modal="true" aria-labelledby="changePasswordTitle">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="changePasswordTitle">修改密码</span>
+          <span class="app-dialog__subtitle" id="changePasswordSubtitle">首次登录或管理员重置后，请先修改密码再使用平台</span>
+        </div>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <div class="change-password-user" aria-label="当前账号">
+          <div class="form-group">
+            <label class="form-label">用户名</label>
+            <div class="form-input form-input--readonly" id="changePasswordUsername">-</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">用户类型</label>
+            <div class="form-input form-input--readonly" id="changePasswordUserRole">-</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="changePasswordCurrent">当前密码</label>
+          <input class="form-input" id="changePasswordCurrent" type="password" autocomplete="current-password" placeholder="请输入当前密码">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="changePasswordNew">新密码</label>
+          <input class="form-input" id="changePasswordNew" type="password" autocomplete="new-password" placeholder="至少 6 位，勿用弱口令" maxlength="128">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="changePasswordConfirm">确认新密码</label>
+          <input class="form-input" id="changePasswordConfirm" type="password" autocomplete="new-password" placeholder="再次输入新密码" maxlength="128">
+        </div>
+        <div class="inline-status error" id="changePasswordError" hidden></div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-primary" id="changePasswordSubmitBtn" type="button">确认修改</button>
+      </div>
+    </div>
+  </div>
+
+
+  <div class="modal-overlay" id="authzGroupModal">
+    <div class="app-dialog app-dialog--md modal-add-model">
+      <div class="app-dialog__header add-model-header">
+        <div>
+          <span class="app-dialog__title" id="authzGroupModalTitle">新建用户组</span>
+          <span class="app-dialog__subtitle">设置组名，并可搜索勾选成员</span>
+        </div>
+        <button class="modal-close" id="closeAuthzGroupModal" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="app-dialog__body add-model-body">
+        <input type="hidden" id="editingAuthzGroupId" value="">
+        <div class="form-group">
+          <label class="form-label" for="authzGroupName">组名</label>
+          <input class="form-input" id="authzGroupName" maxlength="120" placeholder="例如：投研一组">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="authzGroupDesc">描述 <span class="form-label-optional">(可选)</span></label>
+          <input class="form-input" id="authzGroupDesc" maxlength="2000" placeholder="用途说明">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="authzGroupMemberSearch">成员</label>
+          <input class="form-input" type="search" id="authzGroupMemberSearch" placeholder="搜索用户名 / 显示名...">
+          <div class="member-check-list" id="authzGroupMemberList"></div>
+          <div class="form-help" id="authzGroupMemberHint">已选 0 人</div>
+        </div>
+        <div class="inline-status error" id="authzGroupModalError" hidden></div>
+      </div>
+      <div class="app-dialog__footer add-model-footer">
+        <button class="btn-secondary" id="cancelAuthzGroupModal" type="button">取消</button>
+        <button class="btn-primary" id="saveAuthzGroupBtn" type="button">保存</button>
+      </div>
+    </div>
+  </div>
 
   <div class="modal-overlay" id="addUserModal">
     <div class="app-dialog app-dialog--md modal-add-model">
@@ -1636,7 +2018,7 @@
         <input type="hidden" id="editingUserId" value="">
         <div class="form-group">
           <label class="form-label" for="userUsername">用户名</label>
-          <input class="form-input" id="userUsername" placeholder="字母数字或 _-." maxlength="64">
+          <input class="form-input" id="userUsername" placeholder="中文 / 字母开头，支持数字和 _ - ." maxlength="64">
         </div>
         <div class="form-group">
           <label class="form-label" for="userDisplayName">显示名</label>
@@ -1653,6 +2035,11 @@
           <label class="form-label" for="userPassword">密码</label>
           <input class="form-input" id="userPassword" type="password" placeholder="新建必填；编辑留空表示不修改" maxlength="128">
         </div>
+        <div class="form-group" id="userPasswordConfirmGroup" hidden>
+          <label class="form-label" for="userPasswordConfirm">确认密码</label>
+          <input class="form-input" id="userPasswordConfirm" type="password" placeholder="再次输入密码" maxlength="128">
+        </div>
+        <div class="form-help" id="userPasswordHelp">编辑用户时填写密码即重置；对方下次登录可能需要再次修改。</div>
       </div>
       <div class="app-dialog__footer add-model-footer">
         <button class="btn-secondary" id="cancelAddUser" type="button">取消</button>

@@ -34,12 +34,18 @@ def is_sql_datasource(ds_type: str) -> bool:
 def build_sqlalchemy_url(ds: DataSource) -> str:
     kind = dialect_name(ds.type)
     user = quote_plus(ds.username or "")
-    password = quote_plus(ds.password or "")
+    try:
+        from .secret_box import decrypt_secret
+
+        plain_password = decrypt_secret(ds.password)
+    except Exception:
+        plain_password = ds.password or ""
+    password = quote_plus(plain_password or "")
     host = ds.host or "127.0.0.1"
     port = int(ds.port or 0) or None
     database = ds.database or ""
     extra = (ds.extra or "").lstrip("?&")
-    auth = f"{user}:{password}@" if (ds.username or ds.password) else ""
+    auth = f"{user}:{password}@" if (ds.username or plain_password) else ""
 
     if kind == "mysql":
         port = port or 3306

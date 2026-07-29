@@ -18,6 +18,9 @@ class KnowledgeBase(Base):
     __tablename__ = "knowledge_bases"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     chunk_mode: Mapped[str] = mapped_column(String(32), default="recursive")
@@ -86,6 +89,9 @@ class DataSource(Base):
     __tablename__ = "data_sources"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     type: Mapped[str] = mapped_column(String(64), index=True)
     host: Mapped[str] = mapped_column(String(255))
@@ -106,6 +112,9 @@ class Pipeline(Base):
     __tablename__ = "pipelines"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
@@ -200,6 +209,7 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(120), default="")
     role: Mapped[str] = mapped_column(String(32), default="user", index=True)  # admin | user
     is_active: Mapped[int] = mapped_column(Integer, default=1)
+    must_change_password: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -230,3 +240,185 @@ class UserWorkspaceSetting(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="workspace_settings")
+
+
+class Group(Base):
+    """Named user group for resource authorization."""
+
+    __tablename__ = "groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    members: Mapped[list["GroupMember"]] = relationship(
+        back_populates="group", cascade="all, delete-orphan"
+    )
+
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    __table_args__ = (
+        UniqueConstraint("group_id", "user_id", name="uq_group_member"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("groups.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    group: Mapped[Group] = relationship(back_populates="members")
+
+
+class ResourceGrant(Base):
+    """Authorize a KB/datasource to a user or group (admin-managed)."""
+
+    __tablename__ = "resource_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "resource_type",
+            "resource_id",
+            "grantee_type",
+            "grantee_id",
+            name="uq_resource_grant",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # knowledge_base | datasource | capability_*
+    resource_type: Mapped[str] = mapped_column(String(32), index=True)
+    resource_id: Mapped[int] = mapped_column(Integer, index=True)
+    # user | group
+    grantee_type: Mapped[str] = mapped_column(String(16), index=True)
+    grantee_id: Mapped[int] = mapped_column(Integer, index=True)
+    # use = read/query/chat; manage reserved
+    permission: Mapped[str] = mapped_column(String(16), default="use")
+    granted_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ─── AI Gateway ───────────────────────────────────────────────────────────────
+
+
+class ModelProvider(Base):
+    """Upstream LLM vendor / endpoint configuration."""
+
+    __tablename__ = "model_providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # openai_compatible | anthropic | google
+    adapter: Mapped[str] = mapped_column(String(32), default="openai_compatible")
+    base_url: Mapped[str] = mapped_column(String(500), default="")
+    # encrypted with secret_box
+    api_key_enc: Mapped[str] = mapped_column(Text, default="")
+    is_active: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    definitions: Mapped[list["ModelDefinition"]] = relationship(
+        back_populates="provider", cascade="all, delete-orphan"
+    )
+
+
+class ModelDefinition(Base):
+    """Logical model_id → upstream model + provider."""
+
+    __tablename__ = "model_definitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    provider_id: Mapped[int] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="CASCADE"), index=True
+    )
+    upstream_model: Mapped[str] = mapped_column(String(200))
+    # CNY per 1K tokens
+    price_prompt_per_1k: Mapped[float] = mapped_column(Float, default=0.0)
+    price_completion_per_1k: Mapped[float] = mapped_column(Float, default=0.0)
+    is_active: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    provider: Mapped[ModelProvider] = relationship(back_populates="definitions")
+
+
+class ModelRoute(Base):
+    """Named routing strategy → ordered model_id list (fallback)."""
+
+    __tablename__ = "model_routes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # default | cheap | quality | embed | custom
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    description: Mapped[str] = mapped_column(String(500), default="")
+    # JSON array of model_id strings, first = preferred
+    model_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    is_active: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class PlatformApiKey(Base):
+    """External API key for calling Gateway without user login."""
+
+    __tablename__ = "platform_api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    key_prefix: Mapped[str] = mapped_column(String(16), index=True)
+    key_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    owner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # comma-separated scopes, e.g. chat
+    scopes: Mapped[str] = mapped_column(String(200), default="chat")
+    is_active: Mapped[int] = mapped_column(Integer, default=1)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UsageLedger(Base):
+    """Per-call token / cost ledger."""
+
+    __tablename__ = "usage_ledger"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    api_key_id: Mapped[int | None] = mapped_column(
+        ForeignKey("platform_api_keys.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    model_id: Mapped[str] = mapped_column(String(120), default="", index=True)
+    provider: Mapped[str] = mapped_column(String(64), default="")
+    upstream_model: Mapped[str] = mapped_column(String(200), default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated: Mapped[int] = mapped_column(Integer, default=0)
+    cost_cny: Mapped[float] = mapped_column(Float, default=0.0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(32), default="ok", index=True)
+    error_code: Mapped[str] = mapped_column(String(64), default="")
+    # web_chat | feishu | agent | api_key | test
+    source: Mapped[str] = mapped_column(String(32), default="web_chat", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)

@@ -1,4 +1,4 @@
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -7,28 +7,41 @@ from contextlib import asynccontextmanager
 import os
 import shutil
 import httpx
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 try:
     from .llm import call_llm, test_llm_connection
-    from .database import get_db, init_db
+    from .database import engine, get_db, init_db
     from .knowledge_api import router as knowledge_router
     from .datasource_api import router as datasource_router
     from .pipeline_api import router as pipeline_router
-    from .models import DataSource, KnowledgeBase
+    from .models import DataSource, KnowledgeBase, User
     from .services.knowledge import build_rag_context, retrieve
     from .services.chat_agent import KnowledgeToolRef, McpToolRef, run_tool_chat
     from .services.scheduler import start_scheduler, stop_scheduler
+    from .access_control import RESOURCE_DS, RESOURCE_KB, can_use_resource
+    from .deps_auth import require_usable_user
+    from .middleware.request_id import RequestIdMiddleware
+    from .gateway.errors import GatewayError
+    from .gateway.schemas import UpstreamConfig
+    from .gateway.service import chat_text as gateway_chat_text
 except ImportError:
     from llm import call_llm, test_llm_connection
-    from database import get_db, init_db
+    from database import engine, get_db, init_db
     from knowledge_api import router as knowledge_router
     from datasource_api import router as datasource_router
     from pipeline_api import router as pipeline_router
-    from models import DataSource, KnowledgeBase
+    from models import DataSource, KnowledgeBase, User
     from services.knowledge import build_rag_context, retrieve
     from services.chat_agent import KnowledgeToolRef, McpToolRef, run_tool_chat
     from services.scheduler import start_scheduler, stop_scheduler
+    from access_control import RESOURCE_DS, RESOURCE_KB, can_use_resource
+    from deps_auth import require_usable_user
+    from middleware.request_id import RequestIdMiddleware
+    from gateway.errors import GatewayError
+    from gateway.schemas import UpstreamConfig
+    from gateway.service import chat_text as gateway_chat_text
 
 
 @asynccontextmanager
@@ -39,6 +52,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title='AI Platform Demo', lifespan=lifespan)
+app.add_middleware(RequestIdMiddleware)
 init_db()
 app.include_router(knowledge_router)
 app.include_router(datasource_router)
@@ -58,6 +72,16 @@ try:
 except ImportError:
     from feishu_api import router as feishu_router
 app.include_router(feishu_router)
+try:
+    from .authz_api import router as authz_router
+except ImportError:
+    from authz_api import router as authz_router
+app.include_router(authz_router)
+try:
+    from .gateway.router import router as gateway_router
+except ImportError:
+    from gateway.router import router as gateway_router
+app.include_router(gateway_router)
 
 # Frontend static files (source + Vite dist under the same /static mount)
 _web_root = os.path.join(os.path.dirname(__file__), '..', '..', 'web')
@@ -65,6 +89,14 @@ if not os.path.isdir(_web_root):
     _web_root = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'web')
 _web_dist = os.path.join(_web_root, 'dist')
 app.mount('/static', StaticFiles(directory=_web_root), name='static')
+
+
+def _can_use_kb(db: Session, user: User, resource) -> bool:
+    return can_use_resource(db, user, resource, resource_type=RESOURCE_KB)
+
+
+def _can_use_ds(db: Session, user: User, resource) -> bool:
+    return can_use_resource(db, user, resource, resource_type=RESOURCE_DS)
 
 
 def build_skill_context(skills: List[Any]) -> str:
@@ -109,13 +141,33 @@ async def index():
     return JSONResponse({'error': 'index not found'}, status_code=404)
 
 
+@app.get('/health')
+async def health():
+    return {'status': 'ok'}
+
+
+@app.get('/ready')
+async def ready():
+    try:
+        with engine.connect() as conn:
+            conn.execute(text('SELECT 1'))
+        return {'status': 'ready'}
+    except Exception as exc:
+        return JSONResponse(
+            {'status': 'not_ready', 'error': str(exc) or 'database unavailable'},
+            status_code=503,
+        )
+
+
 class ModelConfig(BaseModel):
-    provider: str = Field(..., description='厂商标识，如 openai / anthropic / google')
+    provider: str = Field(..., description='厂商标识，如 openai / anthropic / google / gateway')
     providerName: Optional[str] = None
-    name: str = Field(..., description='模型名，如 gpt-4o')
+    name: str = Field(..., description='模型名或 Gateway 逻辑模型/路由名')
     displayName: Optional[str] = None
     apiKey: str = ''
     baseUrl: str = ''
+    # True: 使用管理员配置的平台逻辑模型/路由，无需用户自带 Key
+    useGateway: bool = False
 
 
 class ChatMessage(BaseModel):
@@ -176,7 +228,12 @@ class TestMcpReq(BaseModel):
 
 
 @app.post('/api/chat')
-async def chat(req: ChatReq, db: Session = Depends(get_db)):
+async def chat(
+    req: ChatReq,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
     text = (req.message or '').strip()
     if not text:
         return JSONResponse({'error': '消息不能为空'}, status_code=400)
@@ -192,16 +249,17 @@ async def chat(req: ChatReq, db: Session = Depends(get_db)):
         )
 
     cfg = req.model
-    if not cfg.apiKey:
+    use_gateway = bool(getattr(cfg, "useGateway", False)) or (cfg.provider or "").lower() == "gateway"
+    if not use_gateway and not cfg.apiKey:
         return JSONResponse(
             {
                 'error': '缺少 API Key',
-                'answer': f'当前模型「{cfg.displayName or cfg.name}」未配置 API Key，请先在配置中心填写。',
+                'answer': f'当前模型「{cfg.displayName or cfg.name}」未配置 API Key，请先在配置中心填写；或改用管理员配置的平台模型。',
                 'sources': [],
             },
             status_code=400,
         )
-    if not cfg.baseUrl and cfg.provider not in ('anthropic', 'google'):
+    if not use_gateway and not cfg.baseUrl and cfg.provider not in ('anthropic', 'google'):
         return JSONResponse(
             {
                 'error': '缺少 Base URL',
@@ -250,7 +308,7 @@ async def chat(req: ChatReq, db: Session = Depends(get_db)):
         try:
             for ref in kb_refs:
                 knowledge_base = db.get(KnowledgeBase, ref.id)
-                if not knowledge_base:
+                if not _can_use_kb(db, user, knowledge_base):
                     missing.append(str(ref.id))
                     continue
                 hits = retrieve(
@@ -296,7 +354,7 @@ async def chat(req: ChatReq, db: Session = Depends(get_db)):
     if datasource_ids:
         for ds_id in datasource_ids:
             ds = db.get(DataSource, ds_id)
-            if ds:
+            if _can_use_ds(db, user, ds):
                 datasources.append(ds)
         if not datasources:
             return JSONResponse(
@@ -308,6 +366,8 @@ async def chat(req: ChatReq, db: Session = Depends(get_db)):
     if skill_context:
         system_context = (skill_context + ("\n\n" + system_context if system_context else "")).strip()
 
+    request_id = getattr(request.state, 'request_id', '') or ''
+    is_admin = (user.role or '').strip().lower() == 'admin'
     try:
         tool_traces: list = []
         tool_cfg = req.toolConfig
@@ -356,9 +416,14 @@ async def chat(req: ChatReq, db: Session = Depends(get_db)):
                 mcp_servers=mcp_refs,
                 allow_pipeline=allow_pipeline,
                 allow_mcp=allow_mcp,
+                user_id=user.id,
+                request_id=request_id,
+                is_admin=is_admin,
+                use_gateway=use_gateway,
             )
         else:
-            answer = await call_llm(
+            answer = await gateway_chat_text(
+                db,
                 provider=cfg.provider,
                 model=cfg.name,
                 api_key=cfg.apiKey,
@@ -366,6 +431,11 @@ async def chat(req: ChatReq, db: Session = Depends(get_db)):
                 message=text,
                 history=history,
                 system_context=system_context,
+                user_id=user.id,
+                source='web_chat',
+                request_id=request_id,
+                is_admin=is_admin,
+                use_gateway=use_gateway,
             )
         label = cfg.displayName or cfg.name
         return {
@@ -375,6 +445,18 @@ async def chat(req: ChatReq, db: Session = Depends(get_db)):
             'model': label,
             'provider': cfg.providerName or cfg.provider,
         }
+    except GatewayError as e:
+        return JSONResponse(
+            {
+                'error': e.message,
+                'answer': f'调用大模型失败：{e.message}',
+                'sources': [],
+                'toolTraces': [],
+                'code': e.code,
+            },
+            status_code=e.status_code,
+            headers=e.headers or None,
+        )
     except Exception as e:
         msg = str(e) or '调用大模型失败'
         return JSONResponse(
@@ -389,20 +471,43 @@ async def chat(req: ChatReq, db: Session = Depends(get_db)):
 
 
 @app.post('/api/models/test')
-async def test_model(req: TestModelReq):
+async def test_model(
+    req: TestModelReq,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_usable_user),
+):
     cfg = req.model
-    if not cfg.apiKey:
+    use_gateway = bool(getattr(cfg, "useGateway", False)) or (cfg.provider or "").lower() == "gateway"
+    if not use_gateway and not cfg.apiKey:
         return JSONResponse({'ok': False, 'message': '请先填写 API Key'}, status_code=400)
     if not cfg.name:
         return JSONResponse({'ok': False, 'message': '请填写模型名称'}, status_code=400)
     try:
-        reply = await test_llm_connection(
-            provider=cfg.provider,
+        from .gateway.service import test_model_connection
+    except ImportError:
+        from gateway.service import test_model_connection
+    try:
+        result = await test_model_connection(
+            db,
             model=cfg.name,
-            api_key=cfg.apiKey,
-            base_url=cfg.baseUrl,
+            upstream=None if use_gateway else UpstreamConfig(
+                provider=cfg.provider,
+                model=cfg.name,
+                api_key=cfg.apiKey,
+                base_url=cfg.baseUrl,
+            ),
+            user_id=user.id,
+            is_admin=(user.role or '').strip().lower() == 'admin',
+            request_id=getattr(request.state, 'request_id', '') or '',
         )
-        return {'ok': True, 'message': '连接成功', 'reply': reply[:200]}
+        return {'ok': True, 'message': '连接成功', 'reply': (result.text or '')[:200]}
+    except GatewayError as e:
+        return JSONResponse(
+            {'ok': False, 'message': e.message, 'code': e.code},
+            status_code=e.status_code,
+            headers=e.headers or None,
+        )
     except Exception as e:
         return JSONResponse({'ok': False, 'message': str(e) or '连接失败'}, status_code=502)
 
@@ -420,7 +525,7 @@ def _resolve_mcp_server(name: str, config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.post('/api/mcp/test')
-async def test_mcp(req: TestMcpReq):
+async def test_mcp(req: TestMcpReq, user: User = Depends(require_usable_user)):
     try:
         server = _resolve_mcp_server(req.name.strip(), req.config)
         url = str(server.get('url') or server.get('serverUrl') or '').strip()
