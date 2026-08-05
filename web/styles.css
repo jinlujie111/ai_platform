@@ -125,6 +125,8 @@ body {
   min-height: 50px; flex-shrink: 0; background: var(--bg);
 }
 .chat-header .chat-title { flex: 1; min-width: 0; }
+/* 首页顶栏不展示 Agent / 知识库 / 数据源选择器 */
+.chat-header-tools { display: none !important; }
 .mobile-menu-btn {
   display: none; width: 36px; height: 36px; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--text-secondary);
