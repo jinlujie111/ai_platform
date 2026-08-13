@@ -18,6 +18,9 @@ SECRET_FIELD_NAMES = {
     "secret",
     "access_token",
     "authorization",
+    "proxy",
+    "X-Tushare-Token",
+    "X-Tushare-Proxy",
 }
 
 

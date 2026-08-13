@@ -26,6 +26,14 @@ def _headers(server: dict[str, Any]) -> dict[str, str]:
     headers = {str(k): str(v) for k, v in raw.items()}
     headers.setdefault("Accept", "application/json, text/event-stream")
     headers.setdefault("Content-Type", "application/json")
+    # Project MCP config fields (preferred over env): token / proxy
+    token = str(server.get("token") or server.get("apiKey") or server.get("api_key") or "").strip()
+    if token:
+        headers.setdefault("X-Tushare-Token", token)
+        headers.setdefault("Authorization", f"Bearer {token}")
+    proxy = str(server.get("proxy") or "").strip()
+    if proxy:
+        headers.setdefault("X-Tushare-Proxy", proxy)
     return headers
 
 

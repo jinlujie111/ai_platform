@@ -355,6 +355,13 @@
                 </div>
               </div>
               <div class="mcp-market-grid" id="mcpMarketGrid">
+                <div class="mcp-market-card" data-market-id="tushare">
+                  <div class="mcp-market-icon">&#x1F4C8;</div>
+                  <div class="mcp-market-name">Tushare</div>
+                  <div class="mcp-market-desc">A股行情/基本面查询；出站经 HTTP 代理访问 api.tushare.pro</div>
+                  <div class="mcp-market-tags"><span class="tag">行情</span><span class="tag">API</span><span class="tag">代理</span></div>
+                  <button class="btn-install-mcp" data-mcp="tushare">安装</button>
+                </div>
                 <div class="mcp-market-card">
                   <div class="mcp-market-icon">&#x1F4DD;</div>
                   <div class="mcp-market-name">File System</div>
@@ -1406,13 +1413,24 @@
           <label class="form-label">描述</label>
           <textarea class="form-textarea" id="mcpDescription" rows="2" placeholder="说明该 MCP 提供的工具和使用场景"></textarea>
         </div>
+        <div class="form-row" id="mcpTushareCredRow">
+          <div class="form-group">
+            <label class="form-label">Tushare Token</label>
+            <input class="form-input" type="password" id="mcpTushareToken" placeholder="在 tushare.pro 获取，写入 MCP 配置" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label class="form-label">HTTP 代理</label>
+            <input class="form-input" type="text" id="mcpTushareProxy" placeholder="如：http://127.0.0.1:7890（可选）" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-help" style="margin-top:-8px;margin-bottom:12px">Token / 代理保存在本项目的 MCP 配置中，不写入 .env。</div>
         <div class="form-group">
           <div class="mcp-json-label">
             <label class="form-label">mcp.json</label>
             <button class="btn-text" id="formatMcpJsonBtn" type="button">格式化 JSON</button>
           </div>
           <textarea class="form-textarea mcp-json-editor" id="mcpJson" spellcheck="false" placeholder='{"mcpServers":{"my-server":{"url":"http://localhost:3000/mcp"}}}'></textarea>
-          <div class="form-help">支持 HTTP/SSE 的 url、headers，或 stdio 的 command、args、env 配置。</div>
+          <div class="form-help">支持 HTTP/SSE 的 url、token、proxy、headers，或 stdio 的 command、args、env 配置。</div>
         </div>
         <div class="form-group">
           <label class="form-label">状态</label>

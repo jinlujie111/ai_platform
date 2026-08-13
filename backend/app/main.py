@@ -82,6 +82,11 @@ try:
 except ImportError:
     from gateway.router import router as gateway_router
 app.include_router(gateway_router)
+try:
+    from .mcp import tushare_mcp_router
+except ImportError:
+    from mcp import tushare_mcp_router
+app.include_router(tushare_mcp_router)
 
 # Frontend static files (source + Vite dist under the same /static mount)
 _web_root = os.path.join(os.path.dirname(__file__), '..', '..', 'web')
@@ -537,9 +542,8 @@ async def test_mcp(req: TestMcpReq, user: User = Depends(require_usable_user)):
                     {'ok': False, 'message': 'MCP URL 必须以 http:// 或 https:// 开头'},
                     status_code=400,
                 )
-            headers = server.get('headers') if isinstance(server.get('headers'), dict) else {}
-            headers = {str(key): str(value) for key, value in headers.items()}
-            headers.setdefault('Accept', 'application/json, text/event-stream')
+            from .services.mcp_client import _headers as mcp_headers
+            headers = mcp_headers(server)
             payload = {
                 'jsonrpc': '2.0',
                 'id': 1,

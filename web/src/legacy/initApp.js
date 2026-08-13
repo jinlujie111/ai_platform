@@ -4166,6 +4166,7 @@ export function initApp() {
     if (name) name.value = item?.name || '';
     if (description) description.value = item?.description || '';
     if (jsonEditor) jsonEditor.value = JSON.stringify(normalizeLegacyMcpConfig(item), null, 2);
+    readMcpCredFieldsFromJson();
     const enabledValue = item?.enabled === false ? 'false' : 'true';
     const radio = document.querySelector(`#addMcpModal input[name="mcpEnabled"][value="${enabledValue}"]`);
     if (radio) radio.checked = true;
@@ -4175,7 +4176,11 @@ export function initApp() {
     if (saveButton) saveButton.disabled = true;
     markSaveReady('saveMcpBtn', false);
     document.getElementById('addMcpModal')?.classList.add('open');
-    window.setTimeout(() => name?.focus(), 50);
+    window.setTimeout(() => {
+      const tokenInput = document.getElementById('mcpTushareToken');
+      if (item?.marketId === 'tushare' || item?.name === 'tushare') tokenInput?.focus();
+      else name?.focus();
+    }, 50);
   }
 
   function closeMcpModal() {
@@ -4187,6 +4192,7 @@ export function initApp() {
   }
 
   async function testMcpConnection() {
+    applyMcpCredFieldsToJson();
     const name = document.getElementById('mcpName')?.value.trim() || '';
     const source = document.getElementById('mcpJson')?.value.trim() || '';
     if (!name) {
@@ -4203,6 +4209,15 @@ export function initApp() {
     if (!config || Array.isArray(config) || typeof config !== 'object') {
       setMcpTestResult('error', 'mcp.json 顶层必须明JSON 对象');
       return;
+    }
+    const entry = getPrimaryMcpServer(config);
+    const server = entry?.[1] || {};
+    if (String(entry?.[0] || name).toLowerCase().includes('tushare') || String(server.url || '').includes('/mcp/tushare')) {
+      if (!String(server.token || '').trim()) {
+        setMcpTestResult('error', '请填写 Tushare Token（保存在 MCP 配置中）');
+        document.getElementById('mcpTushareToken')?.focus();
+        return;
+      }
     }
     const button = document.getElementById('testMcpBtn');
     if (button) {
@@ -4242,6 +4257,7 @@ export function initApp() {
   }
 
   function saveMcpFromModal() {
+    applyMcpCredFieldsToJson();
     if (!verifiedMcpSignature || verifiedMcpSignature !== getMcpFormSignature()) {
       setMcpTestResult('error', '配置已变化，请重新测试连接');
       document.getElementById('saveMcpBtn').disabled = true;
@@ -4261,6 +4277,7 @@ export function initApp() {
       enabled,
       connectionStatus: 'connected',
       source: existing?.source || 'custom',
+      marketId: existing?.marketId,
       testedAt: new Date().toISOString(),
     };
     if (existing) {
@@ -4278,6 +4295,96 @@ export function initApp() {
     localStorage.setItem('user_mcp_configs', JSON.stringify(mcpConfigs));
     localStorage.setItem('mcp_market_state', JSON.stringify(mcpMarketState));
     localStorage.setItem('custom_mcp_market', JSON.stringify(customMcpMarket));
+  }
+
+  function getMcpMarketPreset(marketId, fallbackName = '') {
+    if (marketId === 'tushare') {
+      const origin = window.location.origin || 'http://127.0.0.1:8000';
+      return {
+        name: 'tushare',
+        description: 'Tushare Pro（Token / 代理在 MCP 配置中填写）',
+        mcpJson: {
+          mcpServers: {
+            tushare: {
+              url: `${origin}/mcp/tushare`,
+              token: '',
+              proxy: '',
+            },
+          },
+        },
+      };
+    }
+    return {
+      name: fallbackName || marketId,
+      description: '',
+      mcpJson: null,
+    };
+  }
+
+  function getPrimaryMcpServer(config) {
+    const servers = config?.mcpServers;
+    if (!servers || typeof servers !== 'object') return null;
+    const entries = Object.entries(servers);
+    if (!entries.length) return null;
+    const named = entries.find(([key]) => key === 'tushare');
+    return named || entries[0];
+  }
+
+  function readMcpCredFieldsFromJson() {
+    const editor = document.getElementById('mcpJson');
+    const tokenInput = document.getElementById('mcpTushareToken');
+    const proxyInput = document.getElementById('mcpTushareProxy');
+    if (!editor || !tokenInput || !proxyInput) return;
+    try {
+      const config = JSON.parse(editor.value || '{}');
+      const entry = getPrimaryMcpServer(config);
+      const server = entry?.[1] || {};
+      const headers = server.headers && typeof server.headers === 'object' ? server.headers : {};
+      tokenInput.value = server.token || headers['X-Tushare-Token'] || '';
+      proxyInput.value = server.proxy || headers['X-Tushare-Proxy'] || '';
+    } catch {
+      /* ignore parse errors while typing */
+    }
+  }
+
+  function applyMcpCredFieldsToJson() {
+    const editor = document.getElementById('mcpJson');
+    const tokenInput = document.getElementById('mcpTushareToken');
+    const proxyInput = document.getElementById('mcpTushareProxy');
+    if (!editor || !tokenInput || !proxyInput) return false;
+    let config;
+    try {
+      config = JSON.parse(editor.value || '{}');
+    } catch {
+      return false;
+    }
+    if (!config.mcpServers || typeof config.mcpServers !== 'object') {
+      config.mcpServers = {};
+    }
+    let entry = getPrimaryMcpServer(config);
+    if (!entry) {
+      const origin = window.location.origin || 'http://127.0.0.1:8000';
+      config.mcpServers.tushare = { url: `${origin}/mcp/tushare` };
+      entry = ['tushare', config.mcpServers.tushare];
+    }
+    const [key, server] = entry;
+    const next = { ...(server || {}) };
+    const token = tokenInput.value.trim();
+    const proxy = proxyInput.value.trim();
+    if (token) next.token = token;
+    else delete next.token;
+    if (proxy) next.proxy = proxy;
+    else delete next.proxy;
+    if (next.headers && typeof next.headers === 'object') {
+      const headers = { ...next.headers };
+      delete headers['X-Tushare-Token'];
+      delete headers['X-Tushare-Proxy'];
+      if (Object.keys(headers).length) next.headers = headers;
+      else delete next.headers;
+    }
+    config.mcpServers[key] = next;
+    editor.value = JSON.stringify(config, null, 2);
+    return true;
   }
 
   function renderMcpList() {
@@ -5258,6 +5365,7 @@ export function initApp() {
   document.getElementById('testMcpBtn')?.addEventListener('click', testMcpConnection);
   document.getElementById('saveMcpBtn')?.addEventListener('click', saveMcpFromModal);
   document.getElementById('formatMcpJsonBtn')?.addEventListener('click', () => {
+    applyMcpCredFieldsToJson();
     const editor = document.getElementById('mcpJson');
     try {
       editor.value = JSON.stringify(JSON.parse(editor.value), null, 2);
@@ -5269,8 +5377,12 @@ export function initApp() {
   document.querySelectorAll('#addMcpModal input[name="mcpEnabled"]').forEach((radio) => {
     radio.addEventListener('change', updateMcpStatusOptions);
   });
-  ['mcpName', 'mcpJson'].forEach((id) => {
-    document.getElementById(id)?.addEventListener('input', invalidateMcpVerification);
+  ['mcpName', 'mcpJson', 'mcpTushareToken', 'mcpTushareProxy'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('input', () => {
+      if (id === 'mcpTushareToken' || id === 'mcpTushareProxy') applyMcpCredFieldsToJson();
+      else if (id === 'mcpJson') readMcpCredFieldsFromJson();
+      invalidateMcpVerification();
+    });
   });
 
   document.getElementById('mcpList')?.addEventListener('click', (event) => {
@@ -5297,17 +5409,42 @@ export function initApp() {
     if (install && !install.disabled) {
       const card = install.closest('.mcp-market-card');
       const id = card.dataset.marketId || install.dataset.mcp;
+      const name = card.querySelector('.mcp-market-name')?.textContent.trim() || id;
+      const description = card.querySelector('.mcp-market-desc')?.textContent.trim() || '';
+      const preset = getMcpMarketPreset(id, name);
+      if (id === 'tushare' && preset.mcpJson) {
+        openMcpModal({
+          id: 'mcp_' + Date.now(),
+          marketId: id,
+          name: preset.name || name,
+          description: preset.description || description,
+          mcpJson: preset.mcpJson,
+          enabled: true,
+          source: 'market',
+        });
+        showAppToast('请填写 Tushare Token 与可选代理，测试通过后保存', 'ok');
+        return;
+      }
       mcpConfigs.push({
         id: 'installed_' + Date.now(),
         marketId: id,
-        name: card.querySelector('.mcp-market-name')?.textContent.trim() || id,
-        description: card.querySelector('.mcp-market-desc')?.textContent.trim() || '',
+        name: preset.name || name,
+        description: preset.description || description,
+        mcpJson: preset.mcpJson,
         enabled: true,
+        connectionStatus: preset.mcpJson ? 'connected' : '',
         source: 'market',
+        testedAt: preset.mcpJson ? new Date().toISOString() : undefined,
       });
       persistMcpData();
       initMcpPanel();
       initOverview();
+      showAppToast(
+        preset.mcpJson
+          ? `已安装「${preset.name || name}」`
+          : `已安装「${name}」（需自行补充 mcp.json）`,
+        preset.mcpJson ? 'ok' : 'warn',
+      );
       return;
     }
     const adminButton = event.target.closest('[data-market-action][data-market-type="mcp"]');
