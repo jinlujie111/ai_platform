@@ -5365,6 +5365,7 @@ export function initApp() {
   document.getElementById('testMcpBtn')?.addEventListener('click', testMcpConnection);
   document.getElementById('saveMcpBtn')?.addEventListener('click', saveMcpFromModal);
   document.getElementById('formatMcpJsonBtn')?.addEventListener('click', () => {
+    applyMcpCredFieldsToJson();
     const editor = document.getElementById('mcpJson');
     try {
       editor.value = JSON.stringify(JSON.parse(editor.value), null, 2);
@@ -5376,8 +5377,12 @@ export function initApp() {
   document.querySelectorAll('#addMcpModal input[name="mcpEnabled"]').forEach((radio) => {
     radio.addEventListener('change', updateMcpStatusOptions);
   });
-  ['mcpName', 'mcpJson'].forEach((id) => {
-    document.getElementById(id)?.addEventListener('input', invalidateMcpVerification);
+  ['mcpName', 'mcpJson', 'mcpTushareToken', 'mcpTushareProxy'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('input', () => {
+      if (id === 'mcpTushareToken' || id === 'mcpTushareProxy') applyMcpCredFieldsToJson();
+      else if (id === 'mcpJson') readMcpCredFieldsFromJson();
+      invalidateMcpVerification();
+    });
   });
 
   document.getElementById('mcpList')?.addEventListener('click', (event) => {
