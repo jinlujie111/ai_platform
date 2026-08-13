@@ -82,6 +82,11 @@ try:
 except ImportError:
     from gateway.router import router as gateway_router
 app.include_router(gateway_router)
+try:
+    from .mcp import tushare_mcp_router
+except ImportError:
+    from mcp import tushare_mcp_router
+app.include_router(tushare_mcp_router)
 
 # Frontend static files (source + Vite dist under the same /static mount)
 _web_root = os.path.join(os.path.dirname(__file__), '..', '..', 'web')

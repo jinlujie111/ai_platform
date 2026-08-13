@@ -4280,6 +4280,31 @@ export function initApp() {
     localStorage.setItem('custom_mcp_market', JSON.stringify(customMcpMarket));
   }
 
+  function getMcpMarketPreset(marketId, fallbackName = '') {
+    if (marketId === 'tushare') {
+      const origin = window.location.origin || 'http://127.0.0.1:8000';
+      return {
+        name: 'tushare',
+        description: 'Tushare Pro（经 HTTP 代理访问 api.tushare.pro）',
+        mcpJson: {
+          mcpServers: {
+            tushare: {
+              url: `${origin}/mcp/tushare`,
+              headers: {
+                Accept: 'application/json, text/event-stream',
+              },
+            },
+          },
+        },
+      };
+    }
+    return {
+      name: fallbackName || marketId,
+      description: '',
+      mcpJson: null,
+    };
+  }
+
   function renderMcpList() {
     const list = document.getElementById('mcpList');
     if (!list) return;
@@ -5297,17 +5322,29 @@ export function initApp() {
     if (install && !install.disabled) {
       const card = install.closest('.mcp-market-card');
       const id = card.dataset.marketId || install.dataset.mcp;
+      const name = card.querySelector('.mcp-market-name')?.textContent.trim() || id;
+      const description = card.querySelector('.mcp-market-desc')?.textContent.trim() || '';
+      const preset = getMcpMarketPreset(id, name);
       mcpConfigs.push({
         id: 'installed_' + Date.now(),
         marketId: id,
-        name: card.querySelector('.mcp-market-name')?.textContent.trim() || id,
-        description: card.querySelector('.mcp-market-desc')?.textContent.trim() || '',
+        name: preset.name || name,
+        description: preset.description || description,
+        mcpJson: preset.mcpJson,
         enabled: true,
+        connectionStatus: preset.mcpJson ? 'connected' : '',
         source: 'market',
+        testedAt: preset.mcpJson ? new Date().toISOString() : undefined,
       });
       persistMcpData();
       initMcpPanel();
       initOverview();
+      showAppToast(
+        preset.mcpJson
+          ? `已安装「${preset.name || name}」，请确保 .env 已配置 TUSHARE_TOKEN` + (id === 'tushare' ? ' / TUSHARE_HTTP_PROXY' : '')
+          : `已安装「${name}」（需自行补充 mcp.json）`,
+        preset.mcpJson ? 'ok' : 'warn',
+      );
       return;
     }
     const adminButton = event.target.closest('[data-market-action][data-market-type="mcp"]');
