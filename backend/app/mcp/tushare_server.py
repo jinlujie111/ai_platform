@@ -1,13 +1,12 @@
 """Built-in Tushare MCP server (HTTP JSON-RPC).
 
-Outbound calls to api.tushare.pro go through an optional HTTP proxy:
-  TUSHARE_HTTP_PROXY / TUSHARE_PROXY / HTTPS_PROXY / HTTP_PROXY / ALL_PROXY
-Auth token: TUSHARE_TOKEN (or request header X-Tushare-Token).
+Token / HTTP proxy are provided by the caller's MCP project config
+(mcp.json ``token`` / ``proxy``), forwarded as request headers:
+  X-Tushare-Token, X-Tushare-Proxy
 """
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,7 +16,7 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["mcp-tushare"])
 
-TUSHARE_API_URL = os.getenv("TUSHARE_API_URL", "http://api.tushare.pro").strip()
+TUSHARE_API_URL = "http://api.tushare.pro"
 DISCLAIMER = (
     "数据来自 Tushare，可能存在延时；仅供研究参考，不构成投资建议。"
 )
@@ -101,32 +100,23 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 ]
 
 
-def _proxy_url() -> str | None:
-    for key in (
-        "TUSHARE_HTTP_PROXY",
-        "TUSHARE_PROXY",
-        "HTTPS_PROXY",
-        "HTTP_PROXY",
-        "ALL_PROXY",
-        "https_proxy",
-        "http_proxy",
-        "all_proxy",
-    ):
-        value = (os.getenv(key) or "").strip()
-        if value:
-            return value
-    return None
+def _proxy_from_request(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    value = (request.headers.get("x-tushare-proxy") or "").strip()
+    return value or None
 
 
 def _token_from_request(request: Request | None) -> str:
-    if request is not None:
-        header = (request.headers.get("x-tushare-token") or "").strip()
-        if header:
-            return header
-        auth = (request.headers.get("authorization") or "").strip()
-        if auth.lower().startswith("bearer "):
-            return auth[7:].strip()
-    return (os.getenv("TUSHARE_TOKEN") or "").strip()
+    if request is None:
+        return ""
+    header = (request.headers.get("x-tushare-token") or "").strip()
+    if header:
+        return header
+    auth = (request.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
 
 
 def _jsonrpc_result(req_id: Any, result: Any) -> dict[str, Any]:
@@ -157,11 +147,12 @@ async def _tushare_query(
     params: dict[str, Any] | None = None,
     fields: str = "",
     limit: int = 100,
+    proxy: str | None = None,
 ) -> dict[str, Any]:
     if not token:
         raise ValueError(
-            "未配置 Tushare Token。请在 .env 设置 TUSHARE_TOKEN，"
-            "或在 MCP headers 中传 X-Tushare-Token。"
+            "未配置 Tushare Token。请在 MCP 配置中填写 token"
+            "（mcp.json 的 token 字段，将以 X-Tushare-Token 传递）。"
         )
     api_name = (api_name or "").strip()
     if not api_name:
@@ -174,7 +165,7 @@ async def _tushare_query(
         "params": params or {},
         "fields": fields or "",
     }
-    proxy = _proxy_url()
+    proxy = (proxy or "").strip() or None
     timeout = httpx.Timeout(30.0, connect=10.0)
     client_kwargs: dict[str, Any] = {
         "timeout": timeout,
@@ -219,19 +210,25 @@ async def _tushare_query(
     }
 
 
-async def _call_tool(name: str, arguments: dict[str, Any], token: str) -> dict[str, Any]:
+async def _call_tool(
+    name: str,
+    arguments: dict[str, Any],
+    token: str,
+    proxy: str | None = None,
+) -> dict[str, Any]:
     args = arguments if isinstance(arguments, dict) else {}
+    common = {"token": token, "proxy": proxy}
     if name == "tushare_query":
         params = args.get("params") if isinstance(args.get("params"), dict) else {}
         return await _tushare_query(
-            token=token,
             api_name=str(args.get("api_name") or ""),
             params=params,
             fields=str(args.get("fields") or ""),
             limit=int(args.get("limit") or 100),
+            **common,
         )
     if name == "stock_basic":
-        params: dict[str, Any] = {
+        params = {
             "list_status": str(args.get("list_status") or "L"),
         }
         if args.get("exchange"):
@@ -241,11 +238,11 @@ async def _call_tool(name: str, arguments: dict[str, Any], token: str) -> dict[s
             or "ts_code,symbol,name,area,industry,list_date"
         )
         return await _tushare_query(
-            token=token,
             api_name="stock_basic",
             params=params,
             fields=fields,
             limit=int(args.get("limit") or 100),
+            **common,
         )
     if name == "daily":
         ts_code = str(args.get("ts_code") or "").strip()
@@ -256,11 +253,11 @@ async def _call_tool(name: str, arguments: dict[str, Any], token: str) -> dict[s
             if args.get(key):
                 params[key] = str(args[key])
         return await _tushare_query(
-            token=token,
             api_name="daily",
             params=params,
             fields="",
             limit=int(args.get("limit") or 100),
+            **common,
         )
     raise ValueError(f"未知工具：{name}")
 
@@ -269,6 +266,8 @@ async def _handle_rpc(payload: dict[str, Any], request: Request) -> dict[str, An
     req_id = payload.get("id")
     method = str(payload.get("method") or "").strip()
     params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    token = _token_from_request(request)
+    proxy = _proxy_from_request(request)
 
     if method in ("initialize", "notifications/initialized"):
         return _jsonrpc_result(
@@ -281,7 +280,7 @@ async def _handle_rpc(payload: dict[str, Any], request: Request) -> dict[str, An
                     "version": "1.0.0",
                 },
                 "instructions": (
-                    "Tushare Pro MCP。出站请求可经 TUSHARE_HTTP_PROXY 代理。"
+                    "Tushare Pro MCP。请在项目 MCP 配置中填写 token / proxy。"
                     f" {DISCLAIMER}"
                 ),
             },
@@ -297,7 +296,7 @@ async def _handle_rpc(payload: dict[str, Any], request: Request) -> dict[str, An
         tool_name = str(params.get("name") or "").strip()
         arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
         try:
-            result = await _call_tool(tool_name, arguments, _token_from_request(request))
+            result = await _call_tool(tool_name, arguments, token, proxy)
             return _jsonrpc_result(req_id, _wrap_tool_text(result))
         except Exception as exc:
             return _jsonrpc_result(
@@ -307,7 +306,7 @@ async def _handle_rpc(payload: dict[str, Any], request: Request) -> dict[str, An
                         "error": str(exc),
                         "source": "tushare.pro",
                         "as_of": datetime.now(timezone.utc).isoformat(),
-                        "proxy_used": bool(_proxy_url()),
+                        "proxy_used": bool(proxy),
                         "disclaimer": DISCLAIMER,
                     }
                 ),
@@ -325,10 +324,13 @@ async def tushare_mcp_endpoint(request: Request):
             "ok": True,
             "name": "tushare",
             "transport": "http",
-            "proxy_configured": bool(_proxy_url()),
+            "proxy_configured": bool(_proxy_from_request(request)),
             "token_configured": bool(_token_from_request(request)),
             "tools": [item["name"] for item in TOOL_DEFINITIONS],
-            "message": "POST JSON-RPC: initialize / tools/list / tools/call",
+            "message": (
+                "在 MCP 配置中填写 token / proxy；"
+                "POST JSON-RPC: initialize / tools/list / tools/call"
+            ),
         }
 
     try:
